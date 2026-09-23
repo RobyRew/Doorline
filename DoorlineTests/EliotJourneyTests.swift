@@ -112,47 +112,46 @@ final class EliotJourneyTests: XCTestCase {
     func testRegistrationPostsConsentAndStopsOn400() async throws {
         let wire = ScriptedEliotWire(responses: [
             page(signInHTML, cookie: "x-ms-cpim-csrf=signup-cookie; path=/; secure"),
-            page(signupHTML, cookie: ""),
+            page(signupHTML(), cookie: ""),
+            json(#"{"status":"400","message":"A required field is missing. Please fill out all required fields and try again."}"#),
             json(#"{"status":"400","message":"A required field is missing. Please fill out all required fields and try again."}"#),
         ])
         let journey = EliotWebJourney(wire: wire)
         try await journey.loadRegistration()
+        XCTAssertEqual(journey.page?.fields.first { $0.id == "newPassword" }?.pattern, signupPasswordPAT)
         XCTAssertTrue(wire.sent[1].url.contains("/api/CombinedSigninAndSignup/unified?local=signup&csrf_token=fixture-csrf&tx=StateProperties=fixture-trans&p=B2C_1_BS_DoorEntry_App_iOS-SignUpOrSignIn"))
         let before = wire.sent.count
         do {
-            try await journey.submit([
-                "email": "ada@example.com",
-                "newPassword": "short",
-                "reenterPassword": "short",
-                "givenName": "Ada",
-                "surname": "Lovelace",
-                "country": "it",
-                "extension_CGU": "1",
-                "extension_PrivacyPolicy": "1",
-            ])
+            try await journey.submit(registration(password: "short"))
             XCTFail("A password that misses the page pattern should not be posted")
         } catch {
             XCTAssertEqual(wire.sent.count, before)
         }
-        do {
-            try await journey.submit([
-                "email": "ada@example.com",
-                "newPassword": "Abcdef1!",
-                "reenterPassword": "Abcdef1!",
-                "givenName": "Ada",
-                "surname": "Lovelace",
-                "country": "it",
-                "extension_CGU": "1",
-                "extension_PrivacyPolicy": "1",
-            ])
-            XCTFail("A 400 registration response should not continue")
-        } catch let failure as DoorEntrySignInFailure {
-            XCTAssertEqual(failure.message, "A required field is missing. Please fill out all required fields and try again.")
+        for password in ["Password1", "Abcdef1!"] {
+            do {
+                try await journey.submit(registration(password: password))
+                XCTFail("A 400 registration response should not continue")
+            } catch let failure as DoorEntrySignInFailure {
+                XCTAssertEqual(failure.message, "A required field is missing. Please fill out all required fields and try again.")
+            }
+            let posted = wire.sent.last
+            XCTAssertEqual(posted?.body, "email=ada%40example.com&newPassword=\(password)&reenterPassword=\(password)&givenName=Ada&surname=Lovelace&extension_CGU=1&extension_PrivacyPolicy=1&country=it&request_type=RESPONSE")
+            XCTAssertEqual(posted?.headers["Cookie"], "x-ms-cpim-csrf=signup-cookie")
         }
-        let posted = wire.sent.last
-        XCTAssertEqual(posted?.body, "email=ada%40example.com&newPassword=Abcdef1!&reenterPassword=Abcdef1!&givenName=Ada&surname=Lovelace&extension_CGU=1&extension_PrivacyPolicy=1&country=it&request_type=RESPONSE")
         XCTAssertFalse(wire.sent.contains { $0.url.contains("/confirmed") })
-        XCTAssertEqual(posted?.headers["Cookie"], "x-ms-cpim-csrf=signup-cookie")
+    }
+
+    private func registration(password: String) -> [String: String] {
+        [
+            "email": "ada@example.com",
+            "newPassword": password,
+            "reenterPassword": password,
+            "givenName": "Ada",
+            "surname": "Lovelace",
+            "country": "it",
+            "extension_CGU": "1",
+            "extension_PrivacyPolicy": "1",
+        ]
     }
 
     private func page(_ html: String, cookie: String) -> EliotWireResponse {
@@ -198,9 +197,19 @@ var SA_FIELDS = {"AttributeFields":[{"ID":"newPassword","UX_INPUT_TYPE":"Passwor
 </script>
 """
 
-private let signupHTML = """
+/// Signup `newPassword` PAT from the Eliot page. The class includes an unescaped `[` (`+=[\]`), which NSRegularExpression rejects and JavaScript treats as a literal.
+private let signupPasswordPAT = #"""
+^((?=.*[a-z])(?=.*[A-Z])(?=.*\d)|(?=.*[a-z])(?=.*[A-Z])(?=.*[^A-Za-z0-9])|(?=.*[a-z])(?=.*\d)(?=.*[^A-Za-z0-9])|(?=.*[A-Z])(?=.*\d)(?=.*[^A-Za-z0-9]))([A-Za-z\d@#$%^&amp;*\-_+=[\]{}|\\:&#39;,?/`~&quot;();!]|\.(?!@)){8,16}$
+"""#
+
+private func signupHTML() -> String {
+    let data = try! JSONSerialization.data(withJSONObject: [signupPasswordPAT])
+    let wrapped = String(decoding: data, as: UTF8.self)
+    let quoted = wrapped.dropFirst().dropLast()
+    return """
 <script>
 var SETTINGS = {"csrf":"fixture-csrf","transId":"StateProperties=fixture-trans","api":"SelfAsserted","trimSpacesInPassword":true,"hosts":{"tenant":"/EliotClouduamprd.onmicrosoft.com/B2C_1_BS_DoorEntry_App_iOS-SignUpOrSignIn","policy":"B2C_1_BS_DoorEntry_App_iOS-SignUpOrSignIn"}};
-var SA_FIELDS = {"AttributeFields":[{"ID":"email","UX_INPUT_TYPE":"EmailBox","IS_REQ":true,"VERIFY":true,"PAT":"","OPTIONS":[]},{"ID":"newPassword","UX_INPUT_TYPE":"Password","IS_REQ":true,"VERIFY":false,"PAT":"^(?=.*[a-z])(?=.*[A-Z])(?=.*\\\\d).{8,16}$","OPTIONS":[]},{"ID":"reenterPassword","UX_INPUT_TYPE":"Password","IS_REQ":true,"VERIFY":false,"PAT":"","OPTIONS":[]},{"ID":"givenName","UX_INPUT_TYPE":"TextBox","IS_REQ":true,"VERIFY":false,"PAT":"","OPTIONS":[]},{"ID":"surname","UX_INPUT_TYPE":"TextBox","IS_REQ":true,"VERIFY":false,"PAT":"","OPTIONS":[]},{"ID":"country","UX_INPUT_TYPE":"DropdownSingleSelect","IS_REQ":true,"VERIFY":false,"PAT":"","OPTIONS":[{"VAL":"it","DISP":"Italy"},{"VAL":"fr","DISP":"France"}]},{"ID":"extension_CGU","UX_INPUT_TYPE":"CheckboxMultiSelect","IS_REQ":true,"VERIFY":false,"PAT":"","OPTIONS":[{"VAL":"1","DISP":"terms"}]},{"ID":"extension_PrivacyPolicy","UX_INPUT_TYPE":"CheckboxMultiSelect","IS_REQ":true,"VERIFY":false,"PAT":"","OPTIONS":[{"VAL":"1","DISP":"privacy"}]},{"ID":"extension_Language","UX_INPUT_TYPE":"DropdownSingleSelect","IS_REQ":false,"VERIFY":false,"PAT":"","OPTIONS":[{"VAL":"en","DISP":"English"},{"VAL":"fr","DISP":"Francais"},{"VAL":"it","DISP":"Italiano"}]},{"ID":"displayName","UX_INPUT_TYPE":"TextBox","IS_REQ":false,"VERIFY":false,"PAT":"","OPTIONS":[]}]};
+var SA_FIELDS = {"AttributeFields":[{"ID":"email","UX_INPUT_TYPE":"EmailBox","IS_REQ":true,"VERIFY":true,"PAT":"","OPTIONS":[]},{"ID":"newPassword","UX_INPUT_TYPE":"Password","IS_REQ":true,"VERIFY":false,"PAT":\(quoted),"OPTIONS":[]},{"ID":"reenterPassword","UX_INPUT_TYPE":"Password","IS_REQ":true,"VERIFY":false,"PAT":"","OPTIONS":[]},{"ID":"givenName","UX_INPUT_TYPE":"TextBox","IS_REQ":true,"VERIFY":false,"PAT":"","OPTIONS":[]},{"ID":"surname","UX_INPUT_TYPE":"TextBox","IS_REQ":true,"VERIFY":false,"PAT":"","OPTIONS":[]},{"ID":"country","UX_INPUT_TYPE":"DropdownSingleSelect","IS_REQ":true,"VERIFY":false,"PAT":"","OPTIONS":[{"VAL":"it","DISP":"Italy"},{"VAL":"fr","DISP":"France"}]},{"ID":"extension_CGU","UX_INPUT_TYPE":"CheckboxMultiSelect","IS_REQ":true,"VERIFY":false,"PAT":"","OPTIONS":[{"VAL":"1","DISP":"terms"}]},{"ID":"extension_PrivacyPolicy","UX_INPUT_TYPE":"CheckboxMultiSelect","IS_REQ":true,"VERIFY":false,"PAT":"","OPTIONS":[{"VAL":"1","DISP":"privacy"}]},{"ID":"extension_Language","UX_INPUT_TYPE":"DropdownSingleSelect","IS_REQ":false,"VERIFY":false,"PAT":"","OPTIONS":[{"VAL":"en","DISP":"English"},{"VAL":"fr","DISP":"Francais"},{"VAL":"it","DISP":"Italiano"}]},{"ID":"displayName","UX_INPUT_TYPE":"TextBox","IS_REQ":false,"VERIFY":false,"PAT":"","OPTIONS":[]}]};
 </script>
 """
+}

@@ -136,7 +136,7 @@ enum EliotPasswordRules {
     static func rejection(newPassword: String, reenterPassword: String, pattern: String) -> String? {
         if newPassword != reenterPassword { return mismatch }
         guard !pattern.isEmpty else { return nil }
-        guard let expression = try? NSRegularExpression(pattern: pattern) else {
+        guard let expression = expression(matching: pattern) else {
             return "The password does not match the page rules."
         }
         let range = NSRange(newPassword.startIndex..<newPassword.endIndex, in: newPassword)
@@ -144,6 +144,48 @@ enum EliotPasswordRules {
             return "The password does not match the page rules."
         }
         return nil
+    }
+
+    /// The page PAT is a JavaScript RegExp. An unescaped `[` inside a class (`+=[\]`) is literal there, and NSRegularExpression refuses the pattern, which rejected every password before the POST.
+    private static func expression(matching pattern: String) -> NSRegularExpression? {
+        if let expression = try? NSRegularExpression(pattern: pattern) {
+            return expression
+        }
+        return try? NSRegularExpression(pattern: escapingBracketsInsideClasses(pattern))
+    }
+
+    private static func escapingBracketsInsideClasses(_ pattern: String) -> String {
+        var result = ""
+        var escaped = false
+        var inClass = false
+        for character in pattern {
+            if escaped {
+                result.append(character)
+                escaped = false
+                continue
+            }
+            if character == "\\" {
+                result.append(character)
+                escaped = true
+                continue
+            }
+            if character == "[" {
+                if inClass {
+                    result.append("\\[")
+                } else {
+                    result.append(character)
+                    inClass = true
+                }
+                continue
+            }
+            if character == "]", inClass {
+                result.append(character)
+                inClass = false
+                continue
+            }
+            result.append(character)
+        }
+        return result
     }
 }
 
