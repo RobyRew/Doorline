@@ -487,6 +487,11 @@ struct EliotClaimsSheet: View {
             brassButton(busy ? "Sending" : "Verify code") { Task { await verify(field) } }
         } else if field.kind == .password {
             labeledField(field.label, text: binding(field.id), secure: !reveal, input: .newPassword)
+            if !field.pattern.isEmpty {
+                Text(EliotPasswordRules.summary(for: field.pattern))
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
         } else if field.kind == .menu {
             menuField(field)
         } else if field.kind == .checkbox {

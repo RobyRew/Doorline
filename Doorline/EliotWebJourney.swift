@@ -141,13 +141,43 @@ enum EliotPasswordRules {
         if newPassword != reenterPassword { return mismatch }
         guard !pattern.isEmpty else { return nil }
         guard let expression = expression(matching: pattern) else {
-            return "The password does not match the page rules."
+            return summary(for: pattern)
         }
         let range = NSRange(newPassword.startIndex..<newPassword.endIndex, in: newPassword)
-        if expression.firstMatch(in: newPassword, range: range) == nil {
-            return "The password does not match the page rules."
+        if expression.firstMatch(in: newPassword, range: range) != nil { return nil }
+        let count = newPassword.count
+        if let (min, max) = limits(in: pattern) {
+            if count < min { return "Use at least \(min) characters. \(summary(for: pattern))" }
+            if count > max { return "Use at most \(max) characters. \(summary(for: pattern))" }
         }
-        return nil
+        return summary(for: pattern)
+    }
+
+    /// Plain-language form of the page PAT. The Eliot page keeps this in a regular expression and the form was only saying the password did not match.
+    static func summary(for pattern: String) -> String {
+        let length: String
+        if let (min, max) = limits(in: pattern) {
+            length = "\(min)–\(max) characters"
+        } else {
+            length = "8–16 characters"
+        }
+        if pattern.contains("[^A-Za-z0-9]") {
+            return "\(length). Use at least three of: a lowercase letter, an uppercase letter, a number, and a symbol."
+        }
+        if pattern.contains("[a-z]") && pattern.contains("[A-Z]") && pattern.contains("\\d") {
+            return "\(length). Include a lowercase letter, an uppercase letter, and a number."
+        }
+        return "\(length)."
+    }
+
+    private static func limits(in pattern: String) -> (Int, Int)? {
+        guard let regex = try? NSRegularExpression(pattern: #"\{(\d+),(\d+)\}"#) else { return nil }
+        let ns = pattern as NSString
+        let matches = regex.matches(in: pattern, range: NSRange(location: 0, length: ns.length))
+        guard let match = matches.last, match.numberOfRanges == 3,
+              let min = Int(ns.substring(with: match.range(at: 1))),
+              let max = Int(ns.substring(with: match.range(at: 2))) else { return nil }
+        return (min, max)
     }
 
     /// The page PAT is a JavaScript RegExp. An unescaped `[` inside a class (`+=[\]`) is literal there, and NSRegularExpression refuses the pattern, which rejected every password before the POST.
