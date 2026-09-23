@@ -145,6 +145,19 @@ final class Classe300XSessionTests: XCTestCase {
         XCTAssertEqual(session.association, .saved(AccountLink(account: "ada@example.com", plantID: "plant-7", gatewayID: "gw-3")))
     }
 
+    func testWebSignInRejectsThePasswordEliotRejected() {
+        let data = Data(#"{"status":"400","errorCode":"AADB2C90054","message":"Your password is incorrect."}"#.utf8)
+        XCTAssertEqual(
+            EliotSelfAsserted.failure(in: data),
+            .invalidCredentials("Your password is incorrect.")
+        )
+    }
+
+    func testWebSignInAcceptsThePageStatus() {
+        let data = Data(#"{"status":"200"}"#.utf8)
+        XCTAssertNil(EliotSelfAsserted.failure(in: data))
+    }
+
     func testEmptyPasswordDoesNotAskForTheAccount() async {
         let session = make(directory: TrapDirectory())
         await session.signIn(email: "ada@example.com", password: "  ")
