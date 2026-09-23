@@ -26,6 +26,30 @@ final class EliotJourneyTests: XCTestCase {
         XCTAssertFalse(wire.sent.contains { $0.url.contains("/confirmed") })
     }
 
+    func testSignInSendsTheTransCookieURLSessionJoinsIntoSetCookie() async throws {
+        let joined = [
+            "x-ms-cpim-csrf=fixture-csrf-cookie; domain=login.eliotbylegrand.com; path=/; secure",
+            "x-ms-cpim-cache|fixture_0=fixture-cache; domain=login.eliotbylegrand.com; path=/; secure",
+            "x-ms-cpim-trans=fixture-trans-cookie; domain=login.eliotbylegrand.com; path=/; secure",
+        ].joined(separator: ", ")
+        let wire = ScriptedEliotWire(responses: [
+            page(signInHTML, cookie: joined),
+            json(#"{"status":"400","errorCode":"AADB2C90054","message":"Your password is incorrect."}"#),
+        ])
+        let journey = EliotWebJourney(wire: wire)
+        do {
+            _ = try await journey.submitSignIn(identifier: "ada@example.com", password: "a?b);c,(d)")
+            XCTFail("A 400 page status should not return a token")
+        } catch let failure as DoorEntrySignInFailure {
+            XCTAssertEqual(failure.message, "Your password is incorrect.")
+        }
+        let cookie = wire.sent[1].headers["Cookie"] ?? ""
+        XCTAssertTrue(cookie.contains("x-ms-cpim-csrf=fixture-csrf-cookie"))
+        XCTAssertTrue(cookie.contains("x-ms-cpim-cache|fixture_0=fixture-cache"))
+        XCTAssertTrue(cookie.contains("x-ms-cpim-trans=fixture-trans-cookie"))
+        XCTAssertFalse(wire.sent.contains { $0.url.contains("/confirmed") })
+    }
+
     func testSignInExchangesTheCodeForTheAccessToken() async throws {
         let wire = ScriptedEliotWire(responses: [
             page(signInHTML, cookie: "x-ms-cpim-csrf=fixture-cookie; path=/; secure"),

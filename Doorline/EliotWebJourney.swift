@@ -205,15 +205,12 @@ protocol EliotWire: AnyObject {
 final class EliotCookieJar {
     private(set) var pairs: [(String, String)] = []
 
-    func store(_ response: EliotWireResponse) {
-        let raw = response.header("set-cookie") ?? ""
-        for line in raw.split(separator: "\n") {
-            let piece = line.split(separator: ";", maxSplits: 1).first.map(String.init) ?? ""
-            let parts = piece.split(separator: "=", maxSplits: 1).map(String.init)
-            guard parts.count == 2 else { continue }
-            let name = parts[0].trimmingCharacters(in: .whitespaces)
-            pairs.removeAll { $0.0 == name }
-            pairs.append((name, parts[1]))
+    /// URLSession puts every `Set-Cookie` into one comma-joined header. A cut at the first `;` kept `x-ms-cpim-csrf` and dropped `x-ms-cpim-trans`, so the next call was not the session Eliot had just started and the form answered `Bad Request`.
+    func store(_ response: EliotWireResponse, url: URL) {
+        let cookies = HTTPCookie.cookies(withResponseHeaderFields: response.headers, for: url)
+        for cookie in cookies {
+            pairs.removeAll { $0.0 == cookie.name }
+            pairs.append((cookie.name, cookie.value))
         }
     }
 
@@ -396,7 +393,9 @@ final class EliotWebJourney {
         }
         sent.append(request)
         let response = try await wire.send(request)
-        jar.store(response)
+        if let url = URL(string: request.url) {
+            jar.store(response, url: url)
+        }
         if let location = response.header("location"), location.hasPrefix("com.legrandgroup.c300x:") {
             return EliotWireResponse(status: response.status, headers: response.headers, body: Data(location.utf8))
         }
