@@ -1,5 +1,4 @@
 import Foundation
-import HomeKit
 import Observation
 
 struct DoorPick: Codable, Equatable, Sendable {
@@ -8,6 +7,32 @@ struct DoorPick: Codable, Equatable, Sendable {
     var cameraID: UUID?
     var contactID: UUID?
 }
+
+enum LockReadout: String {
+    case secured = "Locked"
+    case unsecured = "Unlocked"
+    case jammed = "Jammed"
+    case unknown = "No reading"
+    case missing = "No lock in Home"
+}
+
+enum ContactReadout: String {
+    case closed = "Closed"
+    case open = "Open"
+    case unknown = "No reading"
+    case missing = "No contact sensor"
+}
+
+#if canImport(UIKit)
+import UIKit
+typealias PlatformImage = UIImage
+#elseif canImport(AppKit)
+import AppKit
+typealias PlatformImage = NSImage
+#endif
+
+#if canImport(HomeKit)
+import HomeKit
 
 @MainActor
 @Observable
@@ -32,6 +57,8 @@ final class HomeStore: NSObject, HMHomeManagerDelegate {
         manager.authorizationStatus == .authorized
     }
 
+    var hasLock: Bool { lock != nil }
+
     var home: HMHome? {
         if let id = pick.homeID, let match = homes.first(where: { $0.uniqueIdentifier == id }) {
             return match
@@ -44,7 +71,14 @@ final class HomeStore: NSObject, HMHomeManagerDelegate {
     }
 
     var cameras: [HMAccessory] {
-        (home?.accessories ?? []).filter { !$0.cameraProfiles.isEmpty }
+        (home?.accessories ?? []).filter { accessory in
+            // Xcode 26 imports cameraProfiles as optional. Xcode 16.4 does not.
+            #if compiler(>=6.2)
+            !(accessory.cameraProfiles?.isEmpty ?? true)
+            #else
+            !accessory.cameraProfiles.isEmpty
+            #endif
+        }
     }
 
     var contacts: [HMAccessory] {
@@ -112,7 +146,13 @@ final class HomeStore: NSObject, HMHomeManagerDelegate {
     }
 
     func snapshot() async -> PlatformImage? {
-        guard let profile = camera?.cameraProfiles.first, let control = profile.snapshotControl else { return nil }
+        let control: HMCameraSnapshotControl?
+        #if compiler(>=6.2)
+        control = camera?.cameraProfiles?.first?.snapshotControl
+        #else
+        control = camera?.cameraProfiles.first?.snapshotControl
+        #endif
+        guard let control else { return nil }
         return await SnapshotCapture.take(control)
     }
 
@@ -190,35 +230,14 @@ final class HomeStore: NSObject, HMHomeManagerDelegate {
 }
 
 extension HomeStore: HMHomeDelegate {
-    nonisolated func home(_ home: HMHome, didUpdateHomeHubState homeHubState: HMHomeHubState) {}
+    // Swift imported the ObjC selector home:didUpdateHomeHubState: as home(_:didUpdate:).
+    // The old Swift name is an error on the Xcode 16.4 CI toolchain.
+    nonisolated func home(_ home: HMHome, didUpdate homeHubState: HMHomeHubState) {}
 
     nonisolated func homeDidUpdateName(_ home: HMHome) {
         Task { @MainActor in refresh() }
     }
 }
-
-enum LockReadout: String {
-    case secured = "Locked"
-    case unsecured = "Unlocked"
-    case jammed = "Jammed"
-    case unknown = "No reading"
-    case missing = "No lock in Home"
-}
-
-enum ContactReadout: String {
-    case closed = "Closed"
-    case open = "Open"
-    case unknown = "No reading"
-    case missing = "No contact sensor"
-}
-
-#if canImport(UIKit)
-import UIKit
-typealias PlatformImage = UIImage
-#elseif canImport(AppKit)
-import AppKit
-typealias PlatformImage = NSImage
-#endif
 
 private final class SnapshotCapture: NSObject, HMCameraSnapshotControlDelegate {
     private static var inflight: [SnapshotCapture] = []
@@ -249,10 +268,34 @@ private final class SnapshotCapture: NSObject, HMCameraSnapshotControlDelegate {
 
 private extension HMCameraSnapshot {
     var platformImage: PlatformImage? {
-        #if canImport(UIKit)
-        image
+        // The public still is `image` on the Xcode 16 SDK. This SDK's header does not declare it.
+        #if compiler(>=6.2)
+        nil
         #else
         image
         #endif
     }
 }
+
+#else
+
+/// Native macOS has no public HomeKit module. The iPhone and iPad target keeps the real store.
+@MainActor
+@Observable
+final class HomeStore {
+    private(set) var ready = true
+    var lastError: String?
+    var hasLock: Bool { false }
+
+    func refresh() {}
+
+    func setLocked(_ locked: Bool) async {
+        lastError = "Home accessories are available on iPhone and iPad."
+    }
+
+    func lockState() -> LockReadout { .missing }
+    func contactState() -> ContactReadout { .missing }
+    func snapshot() async -> PlatformImage? { nil }
+}
+
+#endif

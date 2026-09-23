@@ -1,5 +1,7 @@
-import HomeKit
 import SwiftUI
+
+#if canImport(HomeKit)
+import HomeKit
 
 struct EntranceView: View {
     @Environment(HomeStore.self) private var store
@@ -7,6 +9,7 @@ struct EntranceView: View {
     @State private var snapshot: PlatformImage?
     @State private var working = false
     @State private var showGear = false
+    @State private var confirmOpen = false
 
     var body: some View {
         NavigationStack {
@@ -104,29 +107,15 @@ struct EntranceView: View {
             statusRow("Lock", store.lockState().rawValue, store.lock?.name)
             statusRow("Leaf", store.contactState().rawValue, store.contact?.name)
 
-            Button {
-                Task { await pulseOpen() }
-            } label: {
-                HStack {
-                    Image(systemName: "lock.open")
-                    Text(working ? "Opening" : "Open")
-                        .font(.title3.weight(.semibold))
-                }
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 18)
+            DoorCommandButton(title: working ? "Opening" : "Open door lock", systemImage: "lock.open", prominent: true) {
+                confirmOpen = true
             }
-            .buttonStyle(.borderedProminent)
-            .controlSize(.large)
-            .disabled(store.lock == nil || working)
+            .disabled(!store.hasLock || working)
 
-            Button {
+            DoorCommandButton(title: "Lock", systemImage: "lock") {
                 Task { await store.setLocked(true) }
-            } label: {
-                Label("Lock", systemImage: "lock")
-                    .frame(maxWidth: .infinity)
             }
-            .buttonStyle(.bordered)
-            .disabled(store.lock == nil || working)
+            .disabled(!store.hasLock || working)
 
             if let lastError = store.lastError {
                 Text(lastError)
@@ -136,13 +125,17 @@ struct EntranceView: View {
 
             Spacer(minLength: 0)
 
-            Text("Siri uses the lock and camera you pick. The Classe 300X does not appear in Home on its own.")
+            Text("Siri uses the lock and camera you pick in Home. The Classe 300X entrance is the other tab.")
                 .font(.footnote)
                 .foregroundStyle(.secondary)
         }
         .padding(24)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .background(Color.doorInk)
+        .confirmationDialog("Open the Home lock?", isPresented: $confirmOpen, titleVisibility: .visible) {
+            Button("Open door lock") { Task { await pulseOpen() } }
+            Button("Cancel", role: .cancel) {}
+        }
     }
 
     private func statusRow(_ title: String, _ value: String, _ detail: String?) -> some View {
@@ -247,7 +240,7 @@ struct PreferencesView: View {
         )
     }
 
-    private func accessoryPicker(_ title: String, _ list: [HMAccessory], _ keyPath: ReferenceWritableKeyPath<DoorPick, UUID?>) -> some View {
+    private func accessoryPicker(_ title: String, _ list: [HMAccessory], _ keyPath: WritableKeyPath<DoorPick, UUID?>) -> some View {
         Picker(title, selection: Binding(
             get: { store.pick[keyPath: keyPath] },
             set: { store.pick[keyPath: keyPath] = $0 }
@@ -259,3 +252,4 @@ struct PreferencesView: View {
         }
     }
 }
+#endif

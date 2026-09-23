@@ -9,7 +9,7 @@ struct UnlockEntranceIntent: AppIntent {
     func perform() async throws -> some IntentResult & ProvidesDialog {
         let store = await HomeStore.shared
         await store.waitUntilReady()
-        guard await store.lock != nil else {
+        guard await store.hasLock else {
             return .result(dialog: "No lock is selected in Doorline.")
         }
         await store.setLocked(false)
@@ -28,7 +28,7 @@ struct LockEntranceIntent: AppIntent {
     func perform() async throws -> some IntentResult & ProvidesDialog {
         let store = await HomeStore.shared
         await store.waitUntilReady()
-        guard await store.lock != nil else {
+        guard await store.hasLock else {
             return .result(dialog: "No lock is selected in Doorline.")
         }
         await store.setLocked(true)

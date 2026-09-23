@@ -4,7 +4,8 @@ import SwiftUI
 struct DoorlineApp: App {
     var body: some Scene {
         WindowGroup {
-            EntranceView()
+            DoorlineRootView()
+                .environment(Classe300XSession.shared)
                 .environment(HomeStore.shared)
                 .frame(minWidth: 420, minHeight: 640)
         }
@@ -19,9 +20,9 @@ struct DoorlineApp: App {
 
         #if os(macOS)
         Settings {
-            PreferencesView()
-                .environment(HomeStore.shared)
-                .frame(width: 420, height: 360)
+            ClasseSettingsView()
+                .environment(Classe300XSession.shared)
+                .frame(width: 420, height: 480)
         }
         #endif
     }

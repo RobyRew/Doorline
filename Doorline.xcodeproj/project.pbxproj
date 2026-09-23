@@ -13,6 +13,11 @@
 		A10000000000000000000004 /* DoorIntents.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000004; };
 		A10000000000000000000005 /* Theme.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000005; };
 		A10000000000000000000006 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000006; };
+		A10000000000000000000012 /* C300XCodec.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000012; };
+		A10000000000000000000013 /* Classe300XSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000013; };
+		A10000000000000000000014 /* DoorGlass.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000014; };
+		A10000000000000000000015 /* Classe300XView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000015; };
+		A10000000000000000000020 /* Classe300XSessionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000020; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -24,10 +29,33 @@
 		A20000000000000000000006 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		A20000000000000000000007 /* Doorline.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = Doorline.entitlements; sourceTree = "<group>"; };
 		A20000000000000000000008 /* Doorline.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Doorline.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		A20000000000000000000012 /* C300XCodec.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = C300XCodec.swift; sourceTree = "<group>"; };
+		A20000000000000000000013 /* Classe300XSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Classe300XSession.swift; sourceTree = "<group>"; };
+		A20000000000000000000014 /* DoorGlass.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DoorGlass.swift; sourceTree = "<group>"; };
+		A20000000000000000000015 /* Classe300XView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Classe300XView.swift; sourceTree = "<group>"; };
+		A20000000000000000000020 /* Classe300XSessionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Classe300XSessionTests.swift; sourceTree = "<group>"; };
+		A20000000000000000000021 /* DoorlineTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = DoorlineTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
+
+/* Begin PBXContainerItemProxy section */
+		A11000000000000000000001 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = A80000000000000000000001 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = A50000000000000000000001;
+			remoteInfo = Doorline;
+		};
+/* End PBXContainerItemProxy section */
 
 /* Begin PBXFrameworksBuildPhase section */
 		A30000000000000000000001 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		A30000000000000000000002 /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -41,6 +69,7 @@
 			isa = PBXGroup;
 			children = (
 				A40000000000000000000002 /* Doorline */,
+				A40000000000000000000004 /* DoorlineTests */,
 				A40000000000000000000003 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -53,6 +82,10 @@
 				A20000000000000000000003 /* EntranceView.swift */,
 				A20000000000000000000004 /* DoorIntents.swift */,
 				A20000000000000000000005 /* Theme.swift */,
+				A20000000000000000000012 /* C300XCodec.swift */,
+				A20000000000000000000013 /* Classe300XSession.swift */,
+				A20000000000000000000014 /* DoorGlass.swift */,
+				A20000000000000000000015 /* Classe300XView.swift */,
 				A20000000000000000000006 /* Assets.xcassets */,
 				A20000000000000000000007 /* Doorline.entitlements */,
 			);
@@ -63,8 +96,17 @@
 			isa = PBXGroup;
 			children = (
 				A20000000000000000000008 /* Doorline.app */,
+				A20000000000000000000021 /* DoorlineTests.xctest */,
 			);
 			name = Products;
+			sourceTree = "<group>";
+		};
+		A40000000000000000000004 /* DoorlineTests */ = {
+			isa = PBXGroup;
+			children = (
+				A20000000000000000000020 /* Classe300XSessionTests.swift */,
+			);
+			path = DoorlineTests;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -87,6 +129,23 @@
 			productReference = A20000000000000000000008 /* Doorline.app */;
 			productType = "com.apple.product-type.application";
 		};
+		A50000000000000000000002 /* DoorlineTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = A70000000000000000000004 /* Build configuration list for PBXNativeTarget "DoorlineTests" */;
+			buildPhases = (
+				A60000000000000000000003 /* Sources */,
+				A30000000000000000000002 /* Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				A12000000000000000000001 /* PBXTargetDependency */,
+			);
+			name = DoorlineTests;
+			productName = DoorlineTests;
+			productReference = A20000000000000000000021 /* DoorlineTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -98,6 +157,10 @@
 				TargetAttributes = {
 					A50000000000000000000001 = {
 						CreatedOnToolsVersion = 16.0;
+					};
+					A50000000000000000000002 = {
+						CreatedOnToolsVersion = 16.0;
+						TestTargetID = A50000000000000000000001;
 					};
 				};
 			};
@@ -115,6 +178,7 @@
 			projectRoot = "";
 			targets = (
 				A50000000000000000000001 /* Doorline */,
+				A50000000000000000000002 /* DoorlineTests */,
 			);
 		};
 /* End PBXProject section */
@@ -140,10 +204,30 @@
 				A10000000000000000000003 /* EntranceView.swift in Sources */,
 				A10000000000000000000004 /* DoorIntents.swift in Sources */,
 				A10000000000000000000005 /* Theme.swift in Sources */,
+				A10000000000000000000012 /* C300XCodec.swift in Sources */,
+				A10000000000000000000013 /* Classe300XSession.swift in Sources */,
+				A10000000000000000000014 /* DoorGlass.swift in Sources */,
+				A10000000000000000000015 /* Classe300XView.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		A60000000000000000000003 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				A10000000000000000000020 /* Classe300XSessionTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		A12000000000000000000001 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = A50000000000000000000001 /* Doorline */;
+			targetProxy = A11000000000000000000001 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
 
 /* Begin XCBuildConfiguration section */
 		A90000000000000000000001 /* Debug */ = {
@@ -251,6 +335,56 @@
 			};
 			name = Release;
 		};
+		A90000000000000000000005 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGNING_ALLOWED = NO;
+				CODE_SIGNING_REQUIRED = NO;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.doorline.home.tests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = auto;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator macosx";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Doorline.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/Doorline";
+			};
+			name = Debug;
+		};
+		A90000000000000000000006 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGNING_ALLOWED = NO;
+				CODE_SIGNING_REQUIRED = NO;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.doorline.home.tests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = auto;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator macosx";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Doorline.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/Doorline";
+			};
+			name = Release;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -268,6 +402,15 @@
 			buildConfigurations = (
 				A90000000000000000000003 /* Debug */,
 				A90000000000000000000004 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		A70000000000000000000004 /* Build configuration list for PBXNativeTarget "DoorlineTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				A90000000000000000000005 /* Debug */,
+				A90000000000000000000006 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
