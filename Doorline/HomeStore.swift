@@ -72,12 +72,8 @@ final class HomeStore: NSObject, HMHomeManagerDelegate {
 
     var cameras: [HMAccessory] {
         (home?.accessories ?? []).filter { accessory in
-            // Xcode 26 imports cameraProfiles as optional. Xcode 16.4 does not.
-            #if compiler(>=6.2)
-            !(accessory.cameraProfiles?.isEmpty ?? true)
-            #else
-            !accessory.cameraProfiles.isEmpty
-            #endif
+            let profiles = accessory.cameraProfiles ?? []
+            return !profiles.isEmpty
         }
     }
 
@@ -146,13 +142,8 @@ final class HomeStore: NSObject, HMHomeManagerDelegate {
     }
 
     func snapshot() async -> PlatformImage? {
-        let control: HMCameraSnapshotControl?
-        #if compiler(>=6.2)
-        control = camera?.cameraProfiles?.first?.snapshotControl
-        #else
-        control = camera?.cameraProfiles.first?.snapshotControl
-        #endif
-        guard let control else { return nil }
+        let profiles = camera?.cameraProfiles ?? []
+        guard let control = profiles.first?.snapshotControl else { return nil }
         return await SnapshotCapture.take(control)
     }
 
@@ -268,12 +259,10 @@ private final class SnapshotCapture: NSObject, HMCameraSnapshotControlDelegate {
 
 private extension HMCameraSnapshot {
     var platformImage: PlatformImage? {
-        // The public still is `image` on the Xcode 16 SDK. This SDK's header does not declare it.
-        #if compiler(>=6.2)
-        nil
-        #else
-        image
-        #endif
+        // The still is an ObjC property. This SDK's header does not always declare it.
+        let getter = NSSelectorFromString("image")
+        guard responds(to: getter) else { return nil }
+        return value(forKey: "image") as? PlatformImage
     }
 }
 
