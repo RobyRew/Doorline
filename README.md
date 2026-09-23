@@ -21,7 +21,7 @@ Liquid Glass is used for the entrance controls when the SDK you compile with dec
 1. Open `Doorline.xcodeproj`.
 2. Select the Doorline target and set your Team.
 3. Run on your iPhone, iPad, or Mac.
-4. On Entrance, save the Eliot account, plant id, and gateway id from the internal unit.
+4. On Entrance, sign in with the same email and password as Door Entry. Eliot returns the Classe 300X on that account.
 5. On iPhone or iPad, open Home if you also want a HomeKit lock. Allow Home access when asked, then pick the lock, camera, and contact sensor.
 
 ## Siri

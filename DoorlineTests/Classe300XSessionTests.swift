@@ -135,7 +135,46 @@ final class Classe300XSessionTests: XCTestCase {
         XCTAssertTrue(session.sent.isEmpty)
     }
 
+    func testSignInReadsThePlantFromTheAccountDocument() async {
+        let document = Data(#"{"plants":[{"id":"plant-7","name":"Home","gateways":[{"id":"gw-3"}]}]}"#.utf8)
+        let session = make(directory: DocumentDirectory(document: document))
+        await session.signIn(email: "ada@example.com", password: "secret")
+        XCTAssertEqual(session.link?.account, "ada@example.com")
+        XCTAssertEqual(session.link?.plantID, "plant-7")
+        XCTAssertEqual(session.link?.gatewayID, "gw-3")
+        XCTAssertEqual(session.association, .saved(AccountLink(account: "ada@example.com", plantID: "plant-7", gatewayID: "gw-3")))
+    }
+
+    func testEmptyPasswordDoesNotAskForTheAccount() async {
+        let session = make(directory: TrapDirectory())
+        await session.signIn(email: "ada@example.com", password: "  ")
+        XCTAssertEqual(session.association, .signedOut)
+        XCTAssertTrue(session.sent.isEmpty)
+    }
+
     private func make() -> Classe300XSession {
-        Classe300XSession(transport: QueuedTransport(), shelf: MemoryShelf())
+        make(directory: DocumentDirectory(document: Data()))
+    }
+
+    private func make(directory: DoorEntryDirectory) -> Classe300XSession {
+        Classe300XSession(transport: QueuedTransport(), shelf: MemoryShelf(), directory: directory)
+    }
+}
+
+@MainActor
+private final class DocumentDirectory: DoorEntryDirectory {
+    let document: Data
+    init(document: Data) { self.document = document }
+
+    func plants(email: String, password: String) async -> Result<[DoorEntryPlant], DoorEntrySignInFailure> {
+        let plants = DoorEntryAccountDocument.plants(in: document)
+        return plants.isEmpty ? .failure(.noPlant) : .success(plants)
+    }
+}
+
+@MainActor
+private final class TrapDirectory: DoorEntryDirectory {
+    func plants(email: String, password: String) async -> Result<[DoorEntryPlant], DoorEntrySignInFailure> {
+        .success([DoorEntryPlant(plantID: "should-not", gatewayID: "should-not", name: "No")])
     }
 }

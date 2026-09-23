@@ -17,6 +17,7 @@
 		A10000000000000000000013 /* Classe300XSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000013; };
 		A10000000000000000000014 /* DoorGlass.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000014; };
 		A10000000000000000000015 /* Classe300XView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000015; };
+		A10000000000000000000016 /* DoorEntrySignIn.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000016; };
 		A10000000000000000000020 /* Classe300XSessionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000020; };
 /* End PBXBuildFile section */
 
@@ -33,6 +34,7 @@
 		A20000000000000000000013 /* Classe300XSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Classe300XSession.swift; sourceTree = "<group>"; };
 		A20000000000000000000014 /* DoorGlass.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DoorGlass.swift; sourceTree = "<group>"; };
 		A20000000000000000000015 /* Classe300XView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Classe300XView.swift; sourceTree = "<group>"; };
+		A20000000000000000000016 /* DoorEntrySignIn.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DoorEntrySignIn.swift; sourceTree = "<group>"; };
 		A20000000000000000000020 /* Classe300XSessionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Classe300XSessionTests.swift; sourceTree = "<group>"; };
 		A20000000000000000000021 /* DoorlineTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = DoorlineTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
@@ -86,6 +88,7 @@
 				A20000000000000000000013 /* Classe300XSession.swift */,
 				A20000000000000000000014 /* DoorGlass.swift */,
 				A20000000000000000000015 /* Classe300XView.swift */,
+				A20000000000000000000016 /* DoorEntrySignIn.swift */,
 				A20000000000000000000006 /* Assets.xcassets */,
 				A20000000000000000000007 /* Doorline.entitlements */,
 			);
@@ -208,6 +211,7 @@
 				A10000000000000000000013 /* Classe300XSession.swift in Sources */,
 				A10000000000000000000014 /* DoorGlass.swift in Sources */,
 				A10000000000000000000015 /* Classe300XView.swift in Sources */,
+				A10000000000000000000016 /* DoorEntrySignIn.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

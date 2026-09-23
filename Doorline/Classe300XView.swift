@@ -106,9 +106,9 @@ struct ClasseEntranceView: View {
     @State private var confirmDoor = false
     @State private var confirmGate = false
     @State private var showSettings = false
-    @State private var account = ""
-    @State private var plantID = ""
-    @State private var gatewayID = ""
+    @State private var email = ""
+    @State private var password = ""
+    @State private var rememberEmail = true
     @State private var working = false
 
     private var ringing: Binding<Bool> {
@@ -133,6 +133,9 @@ struct ClasseEntranceView: View {
                 }
             }
             .navigationTitle("Entrance")
+            .onAppear {
+                if email.isEmpty { email = session.rememberedEmail }
+            }
             #if os(iOS)
             .navigationBarTitleDisplayMode(.inline)
             #endif
@@ -169,17 +172,20 @@ struct ClasseEntranceView: View {
     private var association: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
-                Text("Link a Classe 300X")
+                Text("Sign in")
                     .font(.system(.largeTitle, design: .serif))
-                Text("Doorline addresses the internal unit you already associated with your Eliot account. The portal has to accept the session before a command reaches the panel.")
+                Text("Use the same email and password as Door Entry. Eliot tells Doorline which Classe 300X is on that account.")
                     .foregroundStyle(.secondary)
-                field("Account", text: $account, prompt: "Email")
-                field("Plant", text: $plantID, prompt: "Plant id")
-                field("Gateway", text: $gatewayID, prompt: "Gateway id")
-                DoorCommandButton(title: working ? "Saving" : "Save link", systemImage: "link", prominent: true) {
-                    Task { await saveLink() }
+                field("Email", text: $email, prompt: "Email", secure: false)
+                    .textContentType(.username)
+                field("Password", text: $password, prompt: "Password", secure: true)
+                    .textContentType(.password)
+                Toggle("Remember email", isOn: $rememberEmail)
+                    .font(.subheadline)
+                DoorCommandButton(title: working ? "Signing in" : "Sign in", systemImage: "checkmark", prominent: true) {
+                    Task { await signIn() }
                 }
-                .disabled(working || account.isEmpty || plantID.isEmpty || gatewayID.isEmpty)
+                .disabled(working || !email.contains("@") || password.isEmpty)
                 receipt
             }
             .padding(28)
@@ -313,26 +319,34 @@ struct ClasseEntranceView: View {
         .doorGlass(in: RoundedRectangle(cornerRadius: 18, style: .continuous))
     }
 
-    private func field(_ title: String, text: Binding<String>, prompt: String) -> some View {
+    private func field(_ title: String, text: Binding<String>, prompt: String, secure: Bool) -> some View {
         VStack(alignment: .leading, spacing: 6) {
             Text(title.uppercased())
                 .font(.caption.weight(.semibold))
                 .tracking(1.1)
                 .foregroundStyle(.secondary)
-            TextField(prompt, text: text)
-                .textFieldStyle(.plain)
-                .padding(12)
-                .doorGlass(in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-            #if os(iOS)
-                .textInputAutocapitalization(.never)
-                .autocorrectionDisabled()
-            #endif
+            Group {
+                if secure {
+                    SecureField(prompt, text: text)
+                } else {
+                    TextField(prompt, text: text)
+                        #if os(iOS)
+                        .textInputAutocapitalization(.never)
+                        .keyboardType(.emailAddress)
+                        #endif
+                        .autocorrectionDisabled()
+                }
+            }
+            .textFieldStyle(.plain)
+            .padding(12)
+            .doorGlass(in: RoundedRectangle(cornerRadius: 16, style: .continuous))
         }
     }
 
-    private func saveLink() async {
+    private func signIn() async {
         working = true
-        await session.associate(account: account, plantID: plantID, gatewayID: gatewayID)
+        await session.signIn(email: email, password: password, rememberEmail: rememberEmail)
+        password = ""
         working = false
     }
 }
@@ -476,8 +490,8 @@ struct ClasseSettingsView: View {
         NavigationStack {
             Form {
                 if let link = session.link {
-                    Section("Plant") {
-                        LabeledContent("Account", value: link.account)
+                    Section("Account") {
+                        LabeledContent("Email", value: link.account)
                         LabeledContent("Plant", value: link.plantID)
                         LabeledContent("Gateway", value: link.gatewayID)
                     }

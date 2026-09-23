@@ -127,19 +127,24 @@ final class Classe300XSession {
     private(set) var history: [HistoryEntry] = []
     private(set) var sent: [C300XFrame] = []
     private(set) var lastReceipt: C300XReceipt = .queued
+    private(set) var rememberedEmail: String
 
     private let transport: C300XTransport
     private let shelf: Classe300XShelf
+    private let directory: DoorEntryDirectory
     private let now: () -> Date
 
     init(
         transport: C300XTransport = PortalTransport(),
         shelf: Classe300XShelf = UserDefaultsShelf(),
+        directory: DoorEntryDirectory? = nil,
         now: @escaping () -> Date = Date.init
     ) {
         self.transport = transport
         self.shelf = shelf
+        self.directory = directory ?? EliotDirectory()
         self.now = now
+        rememberedEmail = UserDefaults.standard.string(forKey: Self.rememberedEmailKey) ?? ""
         restore(shelf.load())
     }
 
@@ -169,6 +174,30 @@ final class Classe300XSession {
         if currentCameraID == nil { currentCameraID = cameras.first?.id }
         await emit(.sessionOpen, C300XCodec.sessionOpen)
         persist()
+    }
+
+    /// Door Entry sign-in. The directory returns the plant and gateway for this email; the screen does not ask for them.
+    func signIn(email: String, password: String, rememberEmail: Bool = false) async {
+        let email = email.trimmingCharacters(in: .whitespacesAndNewlines)
+        let password = password.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard email.contains("@"), !password.isEmpty else {
+            lastReceipt = .rejected("Enter the email and password from Door Entry.")
+            return
+        }
+        if rememberEmail {
+            rememberedEmail = email
+            UserDefaults.standard.set(email, forKey: Self.rememberedEmailKey)
+        }
+        switch await directory.plants(email: email, password: password) {
+        case .failure(let failure):
+            lastReceipt = .rejected(failure.message)
+        case .success(let plants):
+            guard let plant = plants.first else {
+                lastReceipt = .rejected(DoorEntrySignInFailure.noPlant.message)
+                return
+            }
+            await associate(account: email, plantID: plant.plantID, gatewayID: plant.gatewayID)
+        }
     }
 
     func signOut() {
@@ -275,6 +304,8 @@ final class Classe300XSession {
         await emit(.professionalStudio, C300XCodec.professionalStudio(enabled: enabled, plant: link.plantID, gateway: link.gatewayID))
         persist()
     }
+
+    private static let rememberedEmailKey = "doorline.remembered-email"
 
     private func emit(_ kind: C300XFrame.Kind, _ wire: String) async {
         let frame = C300XFrame(kind: kind, wire: wire)
