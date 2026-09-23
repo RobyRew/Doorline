@@ -150,7 +150,7 @@ struct ClasseEntranceView: View {
                         Image(systemName: "slider.horizontal.3")
                     }
                     .accessibilityLabel("Entrance settings")
-                    .disabled(session.link == nil)
+                    .tint(Color.doorBrass)
                 }
             }
             .sheet(isPresented: $showSettings) {
@@ -835,9 +835,21 @@ struct ClasseSettingsView: View {
     @Environment(Classe300XSession.self) private var session
     @Environment(\.dismiss) private var dismiss
 
+    private var version: String {
+        Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "1.0"
+    }
+
+    private var build: String {
+        Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "1"
+    }
+
     var body: some View {
         NavigationStack {
             Form {
+                Section("This build") {
+                    LabeledContent("Version", value: version)
+                    LabeledContent("Build", value: build)
+                }
                 if let link = session.link {
                     Section("Account") {
                         LabeledContent("Email", value: link.account)
@@ -874,6 +886,10 @@ struct ClasseSettingsView: View {
                             session.signOut()
                             dismiss()
                         }
+                    }
+                } else {
+                    Section {
+                        Text("Sign in to reach the Classe 300X. Forgot your password and Not yet registered stay on the sign-in screen.")
                     }
                 }
             }
