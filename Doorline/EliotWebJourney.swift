@@ -48,6 +48,8 @@ struct EliotField: Identifiable, Equatable, Sendable {
     }
 
     var id: String
+    /// `DN` from the page. The claim id stayed on screen before this, so the form read `newPassword` and `extension_CGU`.
+    var label: String
     var kind: Kind
     var required: Bool
     var verify: Bool
@@ -55,7 +57,7 @@ struct EliotField: Identifiable, Equatable, Sendable {
     var options: [(value: String, label: String)]
 
     static func == (lhs: EliotField, rhs: EliotField) -> Bool {
-        lhs.id == rhs.id && lhs.kind == rhs.kind && lhs.required == rhs.required && lhs.verify == rhs.verify && lhs.pattern == rhs.pattern && lhs.options.elementsEqual(rhs.options, by: { $0.value == $1.value && $0.label == $1.label })
+        lhs.id == rhs.id && lhs.label == rhs.label && lhs.kind == rhs.kind && lhs.required == rhs.required && lhs.verify == rhs.verify && lhs.pattern == rhs.pattern && lhs.options.elementsEqual(rhs.options, by: { $0.value == $1.value && $0.label == $1.label })
     }
 }
 
@@ -108,8 +110,10 @@ enum EliotPageDocument {
             guard let value = option["VAL"] as? String else { return nil }
             return (value, option["DISP"] as? String ?? value)
         }
+        let display = (raw["DN"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         return EliotField(
             id: id,
+            label: display.isEmpty ? id : display,
             kind: kind,
             required: (raw["IS_REQ"] as? Bool) ?? false,
             verify: (raw["VERIFY"] as? Bool) ?? false,

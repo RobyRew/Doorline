@@ -189,10 +189,8 @@ struct ClasseEntranceView: View {
                     .font(.system(.largeTitle, design: .serif))
                 Text("Use the same email and password as Door Entry. Eliot tells Doorline which Classe 300X is on that account.")
                     .foregroundStyle(.secondary)
-                field("Email", text: $email, prompt: "Email", secure: false)
-                    .textContentType(.username)
-                field("Password", text: $password, prompt: "Password", secure: !showPassword)
-                    .textContentType(.password)
+                field("Email", text: $email, prompt: "Email", secure: false, account: true)
+                field("Password", text: $password, prompt: "Password", secure: !showPassword, account: false)
                 Toggle("Show password", isOn: $showPassword)
                     .font(.subheadline)
                 Toggle("Keep me signed in", isOn: $keepSignedIn)
@@ -341,7 +339,7 @@ struct ClasseEntranceView: View {
         .doorGlass(in: RoundedRectangle(cornerRadius: 18, style: .continuous))
     }
 
-    private func field(_ title: String, text: Binding<String>, prompt: String, secure: Bool) -> some View {
+    private func field(_ title: String, text: Binding<String>, prompt: String, secure: Bool, account: Bool) -> some View {
         VStack(alignment: .leading, spacing: 6) {
             Text(title.uppercased())
                 .font(.caption.weight(.semibold))
@@ -350,13 +348,15 @@ struct ClasseEntranceView: View {
             Group {
                 if secure {
                     SecureField(prompt, text: text)
+                        .textContentType(.password)
                 } else {
                     TextField(prompt, text: text)
+                        .textContentType(account ? .username : .password)
+                        .autocorrectionDisabled()
                         #if os(iOS)
                         .textInputAutocapitalization(.never)
-                        .keyboardType(.emailAddress)
+                        .keyboardType(account ? .emailAddress : .default)
                         #endif
-                        .autocorrectionDisabled()
                 }
             }
             .textFieldStyle(.plain)
@@ -386,27 +386,61 @@ struct EliotClaimsSheet: View {
 
     var body: some View {
         NavigationStack {
-            Form {
-                if let page = journey.page {
-                    ForEach(page.fields) { field in
-                        fieldRow(field)
+            ZStack {
+                Color.doorInk.ignoresSafeArea()
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 18) {
+                        if let page = journey.page {
+                            if !subtitle.isEmpty {
+                                Text(subtitle)
+                                    .foregroundStyle(.secondary)
+                            }
+                            if !note.isEmpty {
+                                noteBanner
+                            }
+                            ForEach(page.fields) { field in
+                                fieldBlock(field)
+                            }
+                            if page.fields.contains(where: { $0.kind == .password }) {
+                                Toggle("Show password", isOn: $reveal)
+                                    .font(.subheadline)
+                                    .tint(Color.doorBrass)
+                            }
+                        } else if note.isEmpty {
+                            ProgressView("Opening Eliot")
+                                .tint(Color.doorBrass)
+                                .frame(maxWidth: .infinity, minHeight: 240)
+                        } else {
+                            noteBanner
+                        }
                     }
-                    Button(busy ? "Sending" : "Continue") {
-                        Task { await submit() }
-                    }
-                    .disabled(busy)
-                } else if note.isEmpty {
-                    ProgressView("Opening Eliot")
+                    .padding(28)
+                    .padding(.bottom, 8)
                 }
-                if !note.isEmpty {
-                    Text(note)
-                        .foregroundStyle(Color.doorWarn)
+                .safeAreaInset(edge: .bottom) {
+                    if journey.page != nil {
+                        DoorCommandButton(title: busy ? "Sending" : "Continue", systemImage: "checkmark", prominent: true) {
+                            Task { await submit() }
+                        }
+                        .disabled(busy)
+                        .padding(.horizontal, 28)
+                        .padding(.top, 8)
+                        .padding(.bottom, 12)
+                        .background(Color.doorInk)
+                    }
                 }
             }
             .navigationTitle(title)
+            #if os(iOS)
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbarColorScheme(.dark, for: .navigationBar)
+            .toolbarBackground(Color.doorInk, for: .navigationBar)
+            #endif
+            .preferredColorScheme(.dark)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Close") { dismiss() }
+                        .foregroundStyle(Color.doorBrass)
                 }
             }
             .task { await open() }
@@ -416,39 +450,157 @@ struct EliotClaimsSheet: View {
         #endif
     }
 
+    private var subtitle: String {
+        guard let page = journey.page else { return "" }
+        let choosingPassword = page.fields.contains { $0.id == "newPassword" }
+        let verifyingEmail = page.fields.contains { $0.verify }
+        if choosingPassword && verifyingEmail {
+            return "Same details Door Entry asks for. Eliot emails a code before the account is created."
+        }
+        if verifyingEmail {
+            return "Enter the email on the account. Eliot sends a code, then you choose a new password."
+        }
+        if choosingPassword {
+            return "Choose a new password for this account."
+        }
+        return ""
+    }
+
+    private var noteBanner: some View {
+        Text(note)
+            .font(.footnote)
+            .foregroundStyle(Color.doorWarn)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(12)
+            .doorGlass(in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+    }
+
     @ViewBuilder
-    private func fieldRow(_ field: EliotField) -> some View {
+    private func fieldBlock(_ field: EliotField) -> some View {
         if field.verify {
-            TextField(field.id, text: binding(field.id))
-                #if os(iOS)
-                .textInputAutocapitalization(.never)
-                .keyboardType(.emailAddress)
-                #endif
-            Button("Send code") { Task { await send(field) } }
-            TextField("Verification code", text: codeBinding(field.id))
-            Button("Verify code") { Task { await verify(field) } }
+            labeledField(field.label, text: binding(field.id), secure: false, input: .email)
+            brassButton(busy ? "Sending" : "Send code") { Task { await send(field) } }
+            labeledField("Verification code", text: codeBinding(field.id), secure: false, input: .code)
+            brassButton(busy ? "Sending" : "Verify code") { Task { await verify(field) } }
         } else if field.kind == .password {
-            Group {
-                if reveal {
-                    TextField(field.id, text: binding(field.id))
-                } else {
-                    SecureField(field.id, text: binding(field.id))
-                }
-            }
+            labeledField(field.label, text: binding(field.id), secure: !reveal, input: .newPassword)
         } else if field.kind == .menu {
-            Picker(field.id, selection: binding(field.id)) {
-                Text("Choose").tag("")
-                ForEach(field.options, id: \.value) { option in
-                    Text(option.label).tag(option.value)
-                }
-            }
+            menuField(field)
         } else if field.kind == .checkbox {
-            Toggle(field.id, isOn: Binding(
+            Toggle(isOn: Binding(
                 get: { values[field.id] == "1" },
                 set: { values[field.id] = $0 ? "1" : "" }
-            ))
+            )) {
+                Text(field.label)
+                    .font(.subheadline)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .tint(Color.doorBrass)
         } else {
-            TextField(field.id, text: binding(field.id))
+            labeledField(field.label, text: binding(field.id), secure: false, input: textInput(field))
+        }
+    }
+
+    /// The value stays empty until a row is chosen. A form picker with every country was drawing an unselected row as Spain.
+    private func menuField(_ field: EliotField) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            caption(field.label)
+            Menu {
+                Button("Choose") { values[field.id] = "" }
+                ForEach(field.options, id: \.value) { option in
+                    Button(option.label) { values[field.id] = option.value }
+                }
+            } label: {
+                HStack {
+                    Text(menuTitle(field))
+                        .foregroundStyle((values[field.id] ?? "").isEmpty ? .secondary : .primary)
+                    Spacer()
+                    Image(systemName: "chevron.up.chevron.down")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(Color.doorBrass)
+                }
+                .padding(12)
+                .doorGlass(in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+            }
+        }
+    }
+
+    private func menuTitle(_ field: EliotField) -> String {
+        let value = values[field.id] ?? ""
+        guard !value.isEmpty else { return "Choose" }
+        return field.options.first { $0.value == value }?.label ?? "Choose"
+    }
+
+    private enum FieldInput {
+        case plain
+        case email
+        case code
+        case newPassword
+        case givenName
+        case familyName
+        case nickname
+    }
+
+    private func labeledField(_ title: String, text: Binding<String>, secure: Bool, input: FieldInput) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            caption(title)
+            Group {
+                if secure {
+                    SecureField(title, text: text)
+                        #if os(iOS)
+                        .textContentType(input == .newPassword ? .newPassword : .password)
+                        #endif
+                } else {
+                    TextField(title, text: text)
+                        .autocorrectionDisabled()
+                        #if os(iOS)
+                        .textInputAutocapitalization(.never)
+                        .keyboardType(input == .email ? .emailAddress : input == .code ? .numberPad : .default)
+                        .textContentType(iosContent(input))
+                        #endif
+                }
+            }
+            .textFieldStyle(.plain)
+            .padding(12)
+            .doorGlass(in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        }
+    }
+
+    #if os(iOS)
+    private func iosContent(_ input: FieldInput) -> UITextContentType? {
+        switch input {
+        case .email: .emailAddress
+        case .code: .oneTimeCode
+        case .newPassword: .newPassword
+        case .givenName: .givenName
+        case .familyName: .familyName
+        case .nickname: .nickname
+        case .plain: nil
+        }
+    }
+    #endif
+
+    private func caption(_ title: String) -> some View {
+        Text(title.uppercased())
+            .font(.caption.weight(.semibold))
+            .tracking(1.1)
+            .foregroundStyle(.secondary)
+    }
+
+    private func brassButton(_ title: String, action: @escaping () -> Void) -> some View {
+        Button(title, action: action)
+            .font(.subheadline.weight(.semibold))
+            .buttonStyle(.plain)
+            .foregroundStyle(Color.doorBrass)
+            .disabled(busy)
+    }
+
+    private func textInput(_ field: EliotField) -> FieldInput {
+        switch field.id {
+        case "givenName": .givenName
+        case "surname": .familyName
+        case "displayName": .nickname
+        default: field.kind == .email ? .email : .plain
         }
     }
 
