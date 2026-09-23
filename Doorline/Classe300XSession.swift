@@ -186,7 +186,6 @@ final class Classe300XSession {
             return
         }
         storesSession = keepSignedIn
-        (directory as? EliotDirectory)?.rememberMe = keepSignedIn
         if keepSignedIn {
             rememberedEmail = email
             UserDefaults.standard.set(email, forKey: Self.rememberedEmailKey)

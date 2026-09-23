@@ -224,6 +224,7 @@ final class EliotCookieJar {
 
 /// Sign-in, reset, and registration against the Eliot page script.
 @MainActor
+@Observable
 final class EliotWebJourney {
     private let wire: EliotWire
     private let jar = EliotCookieJar()
@@ -368,6 +369,7 @@ final class EliotWebJourney {
                 return nil
             }
             if field.kind == .checkbox {
+                guard value == "1" else { return nil }
                 return (field.id, "1")
             }
             return (field.id, value)
@@ -407,6 +409,24 @@ final class EliotWebJourney {
             return nil
         }
         return items.first { $0.name == "code" }?.value
+    }
+}
+
+/// Stops URLSession from opening the Door Entry redirect and keeps the URL that carries the code.
+final class EliotRedirect: NSObject, URLSessionTaskDelegate {
+    var stopped: URL?
+
+    func urlSession(
+        _ session: URLSession,
+        task: URLSessionTask,
+        willPerformHTTPRedirection response: HTTPURLResponse,
+        newRequest request: URLRequest
+    ) async -> URLRequest? {
+        if let url = request.url, url.absoluteString.hasPrefix("com.legrandgroup.c300x:") {
+            stopped = url
+            return nil
+        }
+        return request
     }
 }
 

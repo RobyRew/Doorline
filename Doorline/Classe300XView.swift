@@ -106,11 +106,12 @@ struct ClasseEntranceView: View {
     @State private var confirmDoor = false
     @State private var confirmGate = false
     @State private var showSettings = false
-    @Environment(\.openURL) private var openURL
     @State private var email = ""
     @State private var password = ""
     @State private var showPassword = false
     @State private var keepSignedIn = true
+    @State private var showReset = false
+    @State private var showRegister = false
     @State private var working = false
 
     private var ringing: Binding<Bool> {
@@ -156,6 +157,16 @@ struct ClasseEntranceView: View {
                 ClasseSettingsView()
                     .environment(session)
             }
+            .sheet(isPresented: $showReset) {
+                EliotClaimsSheet(title: "Reset password") { journey in
+                    try await journey.loadPasswordReset()
+                }
+            }
+            .sheet(isPresented: $showRegister) {
+                EliotClaimsSheet(title: "Create account") { journey in
+                    try await journey.loadRegistration()
+                }
+            }
             #if os(iOS)
             .fullScreenCover(isPresented: ringing) {
                 IncomingCallView()
@@ -191,12 +202,8 @@ struct ClasseEntranceView: View {
                 }
                 .disabled(working || !email.contains("@") || password.isEmpty)
                 VStack(alignment: .leading, spacing: 10) {
-                    Button("Forgot your password?") {
-                        openURL(EliotAccountPage.resetPassword)
-                    }
-                    Button("Not yet registered?") {
-                        openURL(EliotAccountPage.register)
-                    }
+                    Button("Forgot your password?") { showReset = true }
+                    Button("Not yet registered?") { showRegister = true }
                 }
                 .font(.subheadline.weight(.semibold))
                 .buttonStyle(.plain)
@@ -363,6 +370,147 @@ struct ClasseEntranceView: View {
         await session.signIn(email: email, password: password, keepSignedIn: keepSignedIn)
         if session.link != nil { password = "" }
         working = false
+    }
+}
+
+struct EliotClaimsSheet: View {
+    var title: String
+    var load: (EliotWebJourney) async throws -> Void
+    @Environment(\.dismiss) private var dismiss
+    @State private var journey = EliotWebJourney(wire: URLSessionEliotWire())
+    @State private var values: [String: String] = [:]
+    @State private var codes: [String: String] = [:]
+    @State private var reveal = false
+    @State private var note = ""
+    @State private var busy = false
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                if let page = journey.page {
+                    ForEach(page.fields) { field in
+                        fieldRow(field)
+                    }
+                    Button(busy ? "Sending" : "Continue") {
+                        Task { await submit() }
+                    }
+                    .disabled(busy)
+                } else if note.isEmpty {
+                    ProgressView("Opening Eliot")
+                }
+                if !note.isEmpty {
+                    Text(note)
+                        .foregroundStyle(Color.doorWarn)
+                }
+            }
+            .navigationTitle(title)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Close") { dismiss() }
+                }
+            }
+            .task { await open() }
+        }
+        #if os(macOS)
+        .frame(minWidth: 460, minHeight: 560)
+        #endif
+    }
+
+    @ViewBuilder
+    private func fieldRow(_ field: EliotField) -> some View {
+        if field.verify {
+            TextField(field.id, text: binding(field.id))
+                #if os(iOS)
+                .textInputAutocapitalization(.never)
+                .keyboardType(.emailAddress)
+                #endif
+            Button("Send code") { Task { await send(field) } }
+            TextField("Verification code", text: codeBinding(field.id))
+            Button("Verify code") { Task { await verify(field) } }
+        } else if field.kind == .password {
+            Group {
+                if reveal {
+                    TextField(field.id, text: binding(field.id))
+                } else {
+                    SecureField(field.id, text: binding(field.id))
+                }
+            }
+        } else if field.kind == .menu {
+            Picker(field.id, selection: binding(field.id)) {
+                Text("Choose").tag("")
+                ForEach(field.options, id: \.value) { option in
+                    Text(option.label).tag(option.value)
+                }
+            }
+        } else if field.kind == .checkbox {
+            Toggle(field.id, isOn: Binding(
+                get: { values[field.id] == "1" },
+                set: { values[field.id] = $0 ? "1" : "" }
+            ))
+        } else {
+            TextField(field.id, text: binding(field.id))
+        }
+    }
+
+    private func binding(_ id: String) -> Binding<String> {
+        Binding(get: { values[id] ?? "" }, set: { values[id] = $0 })
+    }
+
+    private func codeBinding(_ id: String) -> Binding<String> {
+        Binding(get: { codes[id] ?? "" }, set: { codes[id] = $0 })
+    }
+
+    private func open() async {
+        do {
+            try await load(journey)
+            note = ""
+        } catch let failure as DoorEntrySignInFailure {
+            note = failure.message
+        } catch {
+            note = error.localizedDescription
+        }
+    }
+
+    private func send(_ field: EliotField) async {
+        busy = true
+        do {
+            try await journey.sendCode(claimId: field.id, claimValue: values[field.id] ?? "")
+            note = "Verification code requested."
+        } catch let failure as DoorEntrySignInFailure {
+            note = failure.message
+        } catch {
+            note = error.localizedDescription
+        }
+        busy = false
+    }
+
+    private func verify(_ field: EliotField) async {
+        busy = true
+        do {
+            try await journey.verifyCode(claimId: field.id, claimValue: values[field.id] ?? "", userInput: codes[field.id] ?? "")
+            note = "Code accepted."
+        } catch let failure as DoorEntrySignInFailure {
+            note = failure.message
+        } catch {
+            note = error.localizedDescription
+        }
+        busy = false
+    }
+
+    private func submit() async {
+        busy = true
+        do {
+            try await journey.submit(values)
+            note = journey.page == nil ? "Saved." : (journey.message ?? "")
+            if journey.message == nil, journey.page != nil, note.isEmpty {
+                note = "Continue with the next step."
+            }
+        } catch let failure as DoorEntrySignInFailure {
+            note = failure.message
+        } catch {
+            note = error.localizedDescription
+        }
+        busy = false
     }
 }
 

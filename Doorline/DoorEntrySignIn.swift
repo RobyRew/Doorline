@@ -132,8 +132,6 @@ enum EliotAccountPage {
 
 @MainActor
 final class EliotDirectory: DoorEntryDirectory {
-    var rememberMe = true
-
     func plants(email: String, password: String) async -> Result<[DoorEntryPlant], DoorEntrySignInFailure> {
         do {
             let token = try await accessToken(email: email, password: password)
@@ -149,57 +147,7 @@ final class EliotDirectory: DoorEntryDirectory {
     }
 
     private func accessToken(email: String, password: String) async throws -> String {
-        let redirect = EliotRedirect()
-        let session = URLSession(configuration: .ephemeral, delegate: redirect, delegateQueue: nil)
-        defer { session.finishTasksAndInvalidate() }
-        let authorize = Self.authorizeURL()
-        var pageRequest = URLRequest(url: authorize, timeoutInterval: 30)
-        pageRequest.setValue(Self.browser, forHTTPHeaderField: "User-Agent")
-        let (pageData, _) = try await session.data(for: pageRequest)
-        let html = String(decoding: pageData, as: UTF8.self)
-        let settings = try Self.pageSettings(in: html)
-        var submit = URLRequest(url: Self.selfAssertedURL(transId: settings.transId), timeoutInterval: 30)
-        submit.httpMethod = "POST"
-        submit.setValue(Self.browser, forHTTPHeaderField: "User-Agent")
-        submit.setValue("application/x-www-form-urlencoded; charset=UTF-8", forHTTPHeaderField: "Content-Type")
-        submit.setValue("application/json, text/javascript, */*; q=0.01", forHTTPHeaderField: "Accept")
-        submit.setValue(settings.csrf, forHTTPHeaderField: "X-CSRF-TOKEN")
-        submit.setValue("XMLHttpRequest", forHTTPHeaderField: "X-Requested-With")
-        submit.setValue(authorize.absoluteString, forHTTPHeaderField: "Referer")
-        submit.httpBody = Self.form([
-            "request_type": "RESPONSE",
-            "logonIdentifier": email,
-            "password": password,
-        ])
-        let (asserted, _) = try await session.data(for: submit)
-        if let failure = EliotSelfAsserted.failure(in: asserted) {
-            throw failure
-        }
-        var confirm = URLRequest(url: Self.confirmedURL(csrf: settings.csrf, transId: settings.transId, rememberMe: rememberMe), timeoutInterval: 30)
-        confirm.setValue(Self.browser, forHTTPHeaderField: "User-Agent")
-        confirm.setValue(authorize.absoluteString, forHTTPHeaderField: "Referer")
-        _ = try? await session.data(for: confirm)
-        guard let callback = redirect.stopped, let code = Self.code(in: callback) else {
-            throw DoorEntrySignInFailure.unreachable(Self.callbackError(redirect.stopped) ?? "Eliot did not return a sign-in code.")
-        }
-        var tokenRequest = URLRequest(url: Self.tokenURL, timeoutInterval: 30)
-        tokenRequest.httpMethod = "POST"
-        tokenRequest.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
-        tokenRequest.setValue("application/json", forHTTPHeaderField: "Accept")
-        tokenRequest.httpBody = Self.form([
-            "grant_type": "authorization_code",
-            "client_id": Self.clientID,
-            "scope": Self.scope,
-            "code": code,
-            "redirect_uri": Self.redirect,
-        ])
-        let (tokenData, tokenResponse) = try await session.data(for: tokenRequest)
-        if let json = try? JSONSerialization.jsonObject(with: tokenData) as? [String: Any],
-           let token = json["access_token"] as? String, !token.isEmpty {
-            return token
-        }
-        let status = (tokenResponse as? HTTPURLResponse)?.statusCode ?? 0
-        throw DoorEntrySignInFailure.unreachable("Eliot did not return an access token (\(status)).")
+        try await EliotWebJourney(wire: URLSessionEliotWire()).submitSignIn(identifier: email, password: password)
     }
 
     private func plantDocument(token: String) async throws -> Data {
@@ -221,111 +169,11 @@ final class EliotDirectory: DoorEntryDirectory {
         throw DoorEntrySignInFailure.unreachable("Signed in, but the plant list did not come back (\(statuses.joined(separator: ", "))).")
     }
 
-    private static func pageSettings(in html: String) throws -> (csrf: String, transId: String) {
-        guard let start = html.range(of: "var SETTINGS = "),
-              let end = html.range(of: "};", range: start.upperBound..<html.endIndex) else {
-            throw DoorEntrySignInFailure.unreachable("Eliot's sign-in page had no session.")
-        }
-        let json = html[start.upperBound..<html.index(after: end.lowerBound)]
-        guard let data = json.data(using: .utf8),
-              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let csrf = object["csrf"] as? String,
-              let transId = object["transId"] as? String else {
-            throw DoorEntrySignInFailure.unreachable("Eliot's sign-in page had no session.")
-        }
-        return (csrf, transId)
-    }
-
-    private static func code(in url: URL) -> String? {
-        let parts = URLComponents(url: url, resolvingAgainstBaseURL: false)
-        let query = parts?.queryItems ?? []
-        let fragment = parts?.fragment.map { item -> [URLQueryItem] in
-            URLComponents(string: "https://doorline.invalid/?\(item)")?.queryItems ?? []
-        } ?? []
-        return (query + fragment).first { $0.name == "code" }?.value
-    }
-
-    private static func callbackError(_ url: URL?) -> String? {
-        guard let url else { return nil }
-        let items = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems ?? []
-        return items.first { $0.name == "error_description" }?.value?.removingPercentEncoding
-    }
-
-    private static func form(_ fields: [String: String]) -> Data {
-        var allowed = CharacterSet.alphanumerics
-        allowed.insert(charactersIn: "-._*")
-        let text = fields.map { key, value in
-            let encodedKey = key.addingPercentEncoding(withAllowedCharacters: allowed) ?? key
-            let encodedValue = value.addingPercentEncoding(withAllowedCharacters: allowed) ?? value
-            return "\(encodedKey)=\(encodedValue)"
-        }.joined(separator: "&")
-        return Data(text.utf8)
-    }
-
-    private static func authorizeURL() -> URL {
-        var parts = URLComponents(string: "https://login.eliotbylegrand.com/EliotClouduamprd.onmicrosoft.com/oauth2/v2.0/authorize")!
-        parts.queryItems = [
-            URLQueryItem(name: "p", value: policy),
-            URLQueryItem(name: "client_id", value: clientID),
-            URLQueryItem(name: "nonce", value: "defaultNonce"),
-            URLQueryItem(name: "redirect_uri", value: redirect),
-            URLQueryItem(name: "scope", value: scope),
-            URLQueryItem(name: "response_type", value: "code"),
-            URLQueryItem(name: "prompt", value: "login"),
-        ]
-        return parts.url!
-    }
-
-    private static func selfAssertedURL(transId: String) -> URL {
-        var parts = URLComponents(string: "https://login.eliotbylegrand.com/EliotClouduamprd.onmicrosoft.com/\(policy)/SelfAsserted")!
-        parts.queryItems = [
-            URLQueryItem(name: "tx", value: transId),
-            URLQueryItem(name: "p", value: policy),
-        ]
-        return parts.url!
-    }
-
-    private static func confirmedURL(csrf: String, transId: String, rememberMe: Bool) -> URL {
-        var parts = URLComponents(string: "https://login.eliotbylegrand.com/EliotClouduamprd.onmicrosoft.com/\(policy)/api/CombinedSigninAndSignup/confirmed")!
-        parts.queryItems = [
-            URLQueryItem(name: "rememberMe", value: rememberMe ? "true" : "false"),
-            URLQueryItem(name: "csrf_token", value: csrf),
-            URLQueryItem(name: "tx", value: transId),
-            URLQueryItem(name: "p", value: policy),
-        ]
-        return parts.url!
-    }
-
-    // Values carried by the Door Entry iOS app for the production Eliot web sign-in.
-    private static let clientID = "68391b24-f2fd-44c7-95b3-e04130d4a287"
-    private static let policy = "B2C_1_BS_DoorEntry_App_iOS-SignUpOrSignIn"
-    private static let scope = "openid offline_access https://EliotClouduamprd.onmicrosoft.com/security/access.full"
-    private static let redirect = "com.legrandgroup.c300x://oauth2redirect"
     private static let subscriptionKey = "3c48aa3992754ac28dab36742d5b151a"
-    private static let browser = "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1"
-    private static let tokenURL = URL(string: "https://login.eliotbylegrand.com/EliotClouduamprd.onmicrosoft.com/oauth2/v2.0/token?p=\(policy)")!
     private static let plantURLs = [
         URL(string: "https://www.myhomeweb.com/plants")!,
         URL(string: "https://api.developer.legrand.com/plants")!,
         URL(string: "https://api.developer.legrand.com/bticino/v1.0/plants")!,
         URL(string: "https://api.developer.legrand.com/doorentry/v1.0/plants")!,
     ]
-}
-
-/// Stops URLSession from trying to open the app redirect and keeps the URL that carries the code.
-private final class EliotRedirect: NSObject, URLSessionTaskDelegate {
-    var stopped: URL?
-
-    func urlSession(
-        _ session: URLSession,
-        task: URLSessionTask,
-        willPerformHTTPRedirection response: HTTPURLResponse,
-        newRequest request: URLRequest
-    ) async -> URLRequest? {
-        if let url = request.url, url.absoluteString.hasPrefix("com.legrandgroup.c300x:") {
-            stopped = url
-            return nil
-        }
-        return request
-    }
 }
