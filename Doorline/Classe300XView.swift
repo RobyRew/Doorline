@@ -383,6 +383,8 @@ struct EliotClaimsSheet: View {
     @State private var reveal = false
     @State private var note = ""
     @State private var busy = false
+    @State private var verified: Set<String> = []
+    @State private var formID = 0
 
     var body: some View {
         NavigationStack {
@@ -416,6 +418,7 @@ struct EliotClaimsSheet: View {
                     }
                     .padding(28)
                     .padding(.bottom, 8)
+                    .id(formID)
                 }
                 .safeAreaInset(edge: .bottom) {
                     if journey.page != nil {
@@ -640,6 +643,7 @@ struct EliotClaimsSheet: View {
         busy = true
         do {
             try await journey.verifyCode(claimId: field.id, claimValue: values[field.id] ?? "", userInput: codes[field.id] ?? "")
+            verified.insert(field.id)
             note = "Code accepted."
         } catch let failure as DoorEntrySignInFailure {
             note = failure.message
@@ -650,12 +654,23 @@ struct EliotClaimsSheet: View {
     }
 
     private func submit() async {
+        if let reason = blockedReason() {
+            note = reason
+            return
+        }
+        let before = journey.page?.fields.map(\.id) ?? []
         busy = true
         do {
             try await journey.submit(values)
-            note = journey.page == nil ? "Saved." : (journey.message ?? "")
-            if journey.message == nil, journey.page != nil, note.isEmpty {
-                note = "Continue with the next step."
+            if journey.page == nil {
+                note = title == "Reset password"
+                    ? "Password updated. Close this and sign in with the new one."
+                    : "Account created. Close this and sign in with that email."
+            } else if journey.page?.fields.map(\.id) != before {
+                note = ""
+                formID += 1
+            } else {
+                note = journey.message ?? ""
             }
         } catch let failure as DoorEntrySignInFailure {
             note = failure.message
@@ -663,6 +678,25 @@ struct EliotClaimsSheet: View {
             note = error.localizedDescription
         }
         busy = false
+    }
+
+    /// Continue was posting an unfinished page and then saying to continue again.
+    private func blockedReason() -> String? {
+        guard let fields = journey.page?.fields else { return nil }
+        if let field = fields.first(where: { $0.verify }), !verified.contains(field.id) {
+            return "Enter the code from your email and tap Verify code."
+        }
+        let missing = fields.filter { field in
+            guard field.required else { return false }
+            if field.kind == .checkbox { return values[field.id] != "1" }
+            return (values[field.id] ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        }
+        let texts = missing.filter { $0.kind != .checkbox }.map(\.label)
+        let boxes = missing.filter { $0.kind == .checkbox }.map(\.label)
+        var parts: [String] = []
+        if !texts.isEmpty { parts.append("Fill in \(texts.joined(separator: ", ")).") }
+        if !boxes.isEmpty { parts.append(boxes.joined(separator: " ")) }
+        return parts.isEmpty ? nil : parts.joined(separator: " ")
     }
 }
 

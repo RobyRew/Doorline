@@ -385,9 +385,17 @@ final class EliotWebJourney {
         let confirmed = try await get(EliotEndpoints.confirmed(page: page, api: "SelfAsserted"))
         if let next = EliotPageDocument.parse(String(decoding: confirmed.body, as: UTF8.self)) {
             self.page = next
+            message = nil
             return
         }
-        message = nil
+        if Self.code(in: confirmed) != nil {
+            self.page = nil
+            message = nil
+            return
+        }
+        let reason = "Eliot did not open the next step."
+        message = reason
+        throw DoorEntrySignInFailure.unreachable(reason)
     }
 
     static func passwordRejection(fields: [EliotField], values: [String: String]) -> String? {

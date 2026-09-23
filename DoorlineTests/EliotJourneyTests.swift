@@ -107,6 +107,16 @@ final class EliotJourneyTests: XCTestCase {
         try await second.submit(["newPassword": "Abcdef1!", "reenterPassword": "Abcdef1!"])
         XCTAssertTrue(next.sent.contains { $0.body == "newPassword=Abcdef1!&reenterPassword=Abcdef1!&request_type=RESPONSE" })
         XCTAssertTrue(next.sent.contains { $0.method == "GET" && $0.url.contains("/api/SelfAsserted/confirmed?csrf_token=fixture-csrf&tx=StateProperties=fixture-trans&p=B2C_1_BS_DoorEntry_App_iOS-password") })
+
+        let done = ScriptedEliotWire(responses: [
+            page(newPasswordHTML, cookie: "x-ms-cpim-csrf=reset-cookie; path=/; secure"),
+            json(#"{"status":"200"}"#),
+            EliotWireResponse(status: 302, headers: ["Location": "com.legrandgroup.c300x://oauth2redirect?code=fixture-code"], body: Data()),
+        ])
+        let finished = EliotWebJourney(wire: done)
+        try await finished.loadPasswordReset()
+        try await finished.submit(["newPassword": "Abcdef1!", "reenterPassword": "Abcdef1!"])
+        XCTAssertNil(finished.page)
     }
 
     func testRegistrationPostsConsentAndStopsOn400() async throws {
