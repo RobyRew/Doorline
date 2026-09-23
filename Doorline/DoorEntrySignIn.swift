@@ -110,8 +110,30 @@ enum DoorEntryAccountDocument {
 }
 
 /// Door Entry password sign-in. The iOS app posts the email and password to the Eliot password policy, then reads the plant list.
+/// Eliot pages the Door Entry app opens for a new account and a forgotten password.
+enum EliotAccountPage {
+    static var register: URL { authorize(policy: "B2C_1_BS_DoorEntry_App_iOS-SignUpOrSignIn") }
+    static var resetPassword: URL { authorize(policy: "B2C_1_BS_DoorEntry_App_iOS-password") }
+
+    private static func authorize(policy: String) -> URL {
+        var parts = URLComponents(string: "https://login.eliotbylegrand.com/EliotClouduamprd.onmicrosoft.com/oauth2/v2.0/authorize")!
+        parts.queryItems = [
+            URLQueryItem(name: "p", value: policy),
+            URLQueryItem(name: "client_id", value: "68391b24-f2fd-44c7-95b3-e04130d4a287"),
+            URLQueryItem(name: "nonce", value: "defaultNonce"),
+            URLQueryItem(name: "redirect_uri", value: "com.legrandgroup.c300x://oauth2redirect"),
+            URLQueryItem(name: "scope", value: "openid offline_access https://EliotClouduamprd.onmicrosoft.com/security/access.full"),
+            URLQueryItem(name: "response_type", value: "code"),
+            URLQueryItem(name: "prompt", value: "login"),
+        ]
+        return parts.url!
+    }
+}
+
 @MainActor
 final class EliotDirectory: DoorEntryDirectory {
+    var rememberMe = true
+
     func plants(email: String, password: String) async -> Result<[DoorEntryPlant], DoorEntrySignInFailure> {
         do {
             let token = try await accessToken(email: email, password: password)
@@ -153,7 +175,7 @@ final class EliotDirectory: DoorEntryDirectory {
         if let failure = EliotSelfAsserted.failure(in: asserted) {
             throw failure
         }
-        var confirm = URLRequest(url: Self.confirmedURL(csrf: settings.csrf, transId: settings.transId), timeoutInterval: 30)
+        var confirm = URLRequest(url: Self.confirmedURL(csrf: settings.csrf, transId: settings.transId, rememberMe: rememberMe), timeoutInterval: 30)
         confirm.setValue(Self.browser, forHTTPHeaderField: "User-Agent")
         confirm.setValue(authorize.absoluteString, forHTTPHeaderField: "Referer")
         _ = try? await session.data(for: confirm)
@@ -263,10 +285,10 @@ final class EliotDirectory: DoorEntryDirectory {
         return parts.url!
     }
 
-    private static func confirmedURL(csrf: String, transId: String) -> URL {
+    private static func confirmedURL(csrf: String, transId: String, rememberMe: Bool) -> URL {
         var parts = URLComponents(string: "https://login.eliotbylegrand.com/EliotClouduamprd.onmicrosoft.com/\(policy)/api/CombinedSigninAndSignup/confirmed")!
         parts.queryItems = [
-            URLQueryItem(name: "rememberMe", value: "false"),
+            URLQueryItem(name: "rememberMe", value: rememberMe ? "true" : "false"),
             URLQueryItem(name: "csrf_token", value: csrf),
             URLQueryItem(name: "tx", value: transId),
             URLQueryItem(name: "p", value: policy),

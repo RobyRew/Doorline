@@ -106,9 +106,11 @@ struct ClasseEntranceView: View {
     @State private var confirmDoor = false
     @State private var confirmGate = false
     @State private var showSettings = false
+    @Environment(\.openURL) private var openURL
     @State private var email = ""
     @State private var password = ""
-    @State private var rememberEmail = true
+    @State private var showPassword = false
+    @State private var keepSignedIn = true
     @State private var working = false
 
     private var ringing: Binding<Bool> {
@@ -178,14 +180,27 @@ struct ClasseEntranceView: View {
                     .foregroundStyle(.secondary)
                 field("Email", text: $email, prompt: "Email", secure: false)
                     .textContentType(.username)
-                field("Password", text: $password, prompt: "Password", secure: true)
+                field("Password", text: $password, prompt: "Password", secure: !showPassword)
                     .textContentType(.password)
-                Toggle("Remember email", isOn: $rememberEmail)
+                Toggle("Show password", isOn: $showPassword)
+                    .font(.subheadline)
+                Toggle("Keep me signed in", isOn: $keepSignedIn)
                     .font(.subheadline)
                 DoorCommandButton(title: working ? "Signing in" : "Sign in", systemImage: "checkmark", prominent: true) {
                     Task { await signIn() }
                 }
                 .disabled(working || !email.contains("@") || password.isEmpty)
+                VStack(alignment: .leading, spacing: 10) {
+                    Button("Forgot your password?") {
+                        openURL(EliotAccountPage.resetPassword)
+                    }
+                    Button("Not yet registered?") {
+                        openURL(EliotAccountPage.register)
+                    }
+                }
+                .font(.subheadline.weight(.semibold))
+                .buttonStyle(.plain)
+                .foregroundStyle(Color.doorBrass)
                 receipt
             }
             .padding(28)
@@ -345,8 +360,8 @@ struct ClasseEntranceView: View {
 
     private func signIn() async {
         working = true
-        await session.signIn(email: email, password: password, rememberEmail: rememberEmail)
-        password = ""
+        await session.signIn(email: email, password: password, keepSignedIn: keepSignedIn)
+        if session.link != nil { password = "" }
         working = false
     }
 }

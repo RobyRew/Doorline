@@ -133,6 +133,7 @@ final class Classe300XSession {
     private let shelf: Classe300XShelf
     private let directory: DoorEntryDirectory
     private let now: () -> Date
+    private var storesSession = true
 
     init(
         transport: C300XTransport = PortalTransport(),
@@ -177,14 +178,16 @@ final class Classe300XSession {
     }
 
     /// Door Entry sign-in. The directory returns the plant and gateway for this email; the screen does not ask for them.
-    func signIn(email: String, password: String, rememberEmail: Bool = false) async {
+    func signIn(email: String, password: String, keepSignedIn: Bool = true) async {
         let email = email.trimmingCharacters(in: .whitespacesAndNewlines)
         let password = password.trimmingCharacters(in: .whitespacesAndNewlines)
         guard email.contains("@"), !password.isEmpty else {
             lastReceipt = .rejected("Enter the email and password from Door Entry.")
             return
         }
-        if rememberEmail {
+        storesSession = keepSignedIn
+        (directory as? EliotDirectory)?.rememberMe = keepSignedIn
+        if keepSignedIn {
             rememberedEmail = email
             UserDefaults.standard.set(email, forKey: Self.rememberedEmailKey)
         }
@@ -318,6 +321,10 @@ final class Classe300XSession {
     }
 
     private func persist() {
+        guard storesSession else {
+            shelf.save(Classe300XSnapshot())
+            return
+        }
         var snapshot = Classe300XSnapshot()
         if let link {
             snapshot.account = link.account
