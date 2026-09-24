@@ -78,6 +78,28 @@ enum DoorEntryAccountDocument {
         }
     }
 
+    /// `www.myhomeweb.com/eliot/plants` with header `PRJ_NAME: C3X`.
+    /// An empty service-catalog body was reported as no device; this portal answers 401
+    /// `User not logged or session expired` when the Eliot token is not a portal session.
+    static func portalPlants(status: Int, warning: String, body: Data) -> Result<[DoorEntryPlant], DoorEntrySignInFailure> {
+        if status == 204 || (status == 200 && body.isEmpty) {
+            return .failure(.noPlant)
+        }
+        if !(200..<300).contains(status) {
+            let reason = warning.trimmingCharacters(in: .whitespacesAndNewlines)
+            let detail = reason.isEmpty ? "HTTP \(status)" : reason
+            return .failure(.unreachable("Signed in to Eliot. Door Entry's portal answered \(detail)."))
+        }
+        let parsed = plants(in: body)
+        if !parsed.isEmpty { return .success(parsed) }
+        let listed = catalogPlants(in: body)
+        if listed.isEmpty { return .failure(.noPlant) }
+        let gateway = gatewayID(in: body)
+        return .success(listed.map {
+            DoorEntryPlant(plantID: $0.id, gatewayID: gateway ?? $0.id, name: $0.name)
+        })
+    }
+
     static func gatewayID(in data: Data) -> String? {
         guard !data.isEmpty, let json = try? JSONSerialization.jsonObject(with: data) else { return nil }
         var found: String?
@@ -189,36 +211,20 @@ final class EliotDirectory: DoorEntryDirectory {
         try await EliotWebJourney(wire: URLSessionEliotWire()).submitSignIn(identifier: email, password: password)
     }
 
-    /// Eliot's service catalog. `www.myhomeweb.com/plants` is the old portal site and answers 404.
+    /// Door Entry 1.13.5 stores `prj_name` / `C3X`. The live list is `/eliot/plants`, not the service catalog.
     private func plants(token: String) async throws -> [DoorEntryPlant] {
-        let listed = try await catalog(token: token, path: "/servicecatalog/api/v3.0/plants")
-        let records = DoorEntryAccountDocument.catalogPlants(in: listed)
-        if records.isEmpty { return [] }
-        var found: [DoorEntryPlant] = []
-        for record in records {
-            let modules = try await catalog(token: token, path: "/servicecatalog/api/v3.0/plants/\(record.id)/modules")
-            let gatewayID = DoorEntryAccountDocument.gatewayID(in: modules) ?? record.id
-            found.append(DoorEntryPlant(plantID: record.id, gatewayID: gatewayID, name: record.name))
-        }
-        return found
-    }
-
-    private func catalog(token: String, path: String) async throws -> Data {
-        guard let url = URL(string: "https://api.developer.legrand.com\(path)") else {
+        guard let url = URL(string: "https://www.myhomeweb.com/eliot/plants") else {
             throw DoorEntrySignInFailure.unreachable("Eliot plant URL could not be built.")
         }
         var request = URLRequest(url: url, timeoutInterval: 20)
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         request.setValue("application/json", forHTTPHeaderField: "Accept")
-        request.setValue(Self.subscriptionKey, forHTTPHeaderField: "Ocp-Apim-Subscription-Key")
+        request.setValue("C3X", forHTTPHeaderField: "PRJ_NAME")
+        request.setValue("doorentryforc300x-ios-1.13.5", forHTTPHeaderField: "User-Agent")
         let (data, response) = try await URLSession.shared.data(for: request)
-        let status = (response as? HTTPURLResponse)?.statusCode ?? 0
-        if status == 204 || data.isEmpty { return Data() }
-        guard (200..<300).contains(status) else {
-            throw DoorEntrySignInFailure.unreachable("Signed in, but the plant list came back \(status).")
-        }
-        return data
+        let http = response as? HTTPURLResponse
+        let status = http?.statusCode ?? 0
+        let warning = http?.value(forHTTPHeaderField: "Warning") ?? ""
+        return try DoorEntryAccountDocument.portalPlants(status: status, warning: warning, body: data).get()
     }
-
-    private static let subscriptionKey = "3c48aa3992754ac28dab36742d5b151a"
 }

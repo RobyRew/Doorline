@@ -158,6 +158,24 @@ final class Classe300XSessionTests: XCTestCase {
         XCTAssertNil(EliotSelfAsserted.failure(in: data))
     }
 
+    func testPortalRefusesAMissingSessionInsteadOfAnEmptyAccount() {
+        let result = DoorEntryAccountDocument.portalPlants(
+            status: 401,
+            warning: "User not logged or session expired",
+            body: Data()
+        )
+        XCTAssertEqual(
+            result,
+            .failure(.unreachable("Signed in to Eliot. Door Entry's portal answered User not logged or session expired."))
+        )
+    }
+
+    func testPortalReadsAPlantAndItsGateway() {
+        let body = Data(#"{"plants":[{"id":"plant-1","name":"Home","gateways":[{"id":"gw-9"}]}]}"#.utf8)
+        let result = DoorEntryAccountDocument.portalPlants(status: 200, warning: "", body: body)
+        XCTAssertEqual(result, .success([DoorEntryPlant(plantID: "plant-1", gatewayID: "gw-9", name: "Home")]))
+    }
+
     func testCatalogPlantUsesTheGatewayModule() {
         let plants = Data(#"{"plants":[{"id":"plant-1","name":"Home"}]}"#.utf8)
         XCTAssertEqual(DoorEntryAccountDocument.catalogPlants(in: plants).map(\.id), ["plant-1"])
