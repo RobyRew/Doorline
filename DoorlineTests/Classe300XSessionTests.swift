@@ -158,6 +158,14 @@ final class Classe300XSessionTests: XCTestCase {
         XCTAssertNil(EliotSelfAsserted.failure(in: data))
     }
 
+    func testCatalogPlantUsesTheGatewayModule() {
+        let plants = Data(#"{"plants":[{"id":"plant-1","name":"Home"}]}"#.utf8)
+        XCTAssertEqual(DoorEntryAccountDocument.catalogPlants(in: plants).map(\.id), ["plant-1"])
+        let modules = Data(#"{"modules":[{"id":"gw-9","device":"gateway"},{"id":"lock-1","device":"lock"}]}"#.utf8)
+        XCTAssertEqual(DoorEntryAccountDocument.gatewayID(in: modules), "gw-9")
+        XCTAssertTrue(DoorEntryAccountDocument.catalogPlants(in: Data()).isEmpty)
+    }
+
     func testEmptyPasswordDoesNotAskForTheAccount() async {
         let session = make(directory: TrapDirectory())
         await session.signIn(email: "ada@example.com", password: "  ")

@@ -59,6 +59,46 @@ enum DoorEntryAccountDocument {
         return unique
     }
 
+    static func catalogPlants(in data: Data) -> [(id: String, name: String)] {
+        guard !data.isEmpty, let json = try? JSONSerialization.jsonObject(with: data) else { return [] }
+        let rows: [Any]
+        if let array = json as? [Any] {
+            rows = array
+        } else if let object = json as? [String: Any] {
+            rows = (object["plants"] as? [Any]) ?? (object["value"] as? [Any]) ?? []
+        } else {
+            rows = []
+        }
+        return rows.compactMap { row in
+            guard let object = row as? [String: Any] else { return nil }
+            let id = text(object, keys: ["id", "plantId", "plantID"]) ?? ""
+            guard !id.isEmpty else { return nil }
+            let name = text(object, keys: ["name", "plantName"]) ?? "Home"
+            return (id, name)
+        }
+    }
+
+    static func gatewayID(in data: Data) -> String? {
+        guard !data.isEmpty, let json = try? JSONSerialization.jsonObject(with: data) else { return nil }
+        var found: String?
+        func walk(_ value: Any) {
+            if found != nil { return }
+            if let array = value as? [Any] {
+                for item in array { walk(item) }
+                return
+            }
+            guard let object = value as? [String: Any] else { return }
+            let kind = (text(object, keys: ["device", "type", "hw_type"]) ?? "").lowercased()
+            if kind.contains("gateway"), let id = text(object, keys: ["id", "gatewayId", "gatewayID"]) {
+                found = id
+                return
+            }
+            for child in object.values { walk(child) }
+        }
+        walk(json)
+        return found
+    }
+
     private static func collect(_ value: Any, into found: inout [DoorEntryPlant]) {
         if let array = value as? [Any] {
             for item in array { collect(item, into: &found) }
@@ -135,8 +175,7 @@ final class EliotDirectory: DoorEntryDirectory {
     func plants(email: String, password: String) async -> Result<[DoorEntryPlant], DoorEntrySignInFailure> {
         do {
             let token = try await accessToken(email: email, password: password)
-            let document = try await plantDocument(token: token)
-            let plants = DoorEntryAccountDocument.plants(in: document)
+            let plants = try await plants(token: token)
             if plants.isEmpty { return .failure(.noPlant) }
             return .success(plants)
         } catch let failure as DoorEntrySignInFailure {
@@ -150,30 +189,36 @@ final class EliotDirectory: DoorEntryDirectory {
         try await EliotWebJourney(wire: URLSessionEliotWire()).submitSignIn(identifier: email, password: password)
     }
 
-    private func plantDocument(token: String) async throws -> Data {
-        var statuses: [String] = []
-        for url in Self.plantURLs {
-            var request = URLRequest(url: url, timeoutInterval: 20)
-            request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-            request.setValue("application/json", forHTTPHeaderField: "Accept")
-            if url.host?.contains("developer.legrand.com") == true {
-                request.setValue(Self.subscriptionKey, forHTTPHeaderField: "Ocp-Apim-Subscription-Key")
-            }
-            let (data, response) = try await URLSession.shared.data(for: request)
-            let status = (response as? HTTPURLResponse)?.statusCode ?? 0
-            if (200..<300).contains(status), !DoorEntryAccountDocument.plants(in: data).isEmpty {
-                return data
-            }
-            statuses.append("\(url.host ?? "") \(status)")
+    /// Eliot's service catalog. `www.myhomeweb.com/plants` is the old portal site and answers 404.
+    private func plants(token: String) async throws -> [DoorEntryPlant] {
+        let listed = try await catalog(token: token, path: "/servicecatalog/api/v3.0/plants")
+        let records = DoorEntryAccountDocument.catalogPlants(in: listed)
+        if records.isEmpty { return [] }
+        var found: [DoorEntryPlant] = []
+        for record in records {
+            let modules = try await catalog(token: token, path: "/servicecatalog/api/v3.0/plants/\(record.id)/modules")
+            let gatewayID = DoorEntryAccountDocument.gatewayID(in: modules) ?? record.id
+            found.append(DoorEntryPlant(plantID: record.id, gatewayID: gatewayID, name: record.name))
         }
-        throw DoorEntrySignInFailure.unreachable("Signed in, but the plant list did not come back (\(statuses.joined(separator: ", "))).")
+        return found
+    }
+
+    private func catalog(token: String, path: String) async throws -> Data {
+        guard let url = URL(string: "https://api.developer.legrand.com\(path)") else {
+            throw DoorEntrySignInFailure.unreachable("Eliot plant URL could not be built.")
+        }
+        var request = URLRequest(url: url, timeoutInterval: 20)
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        request.setValue(Self.subscriptionKey, forHTTPHeaderField: "Ocp-Apim-Subscription-Key")
+        let (data, response) = try await URLSession.shared.data(for: request)
+        let status = (response as? HTTPURLResponse)?.statusCode ?? 0
+        if status == 204 || data.isEmpty { return Data() }
+        guard (200..<300).contains(status) else {
+            throw DoorEntrySignInFailure.unreachable("Signed in, but the plant list came back \(status).")
+        }
+        return data
     }
 
     private static let subscriptionKey = "3c48aa3992754ac28dab36742d5b151a"
-    private static let plantURLs = [
-        URL(string: "https://www.myhomeweb.com/plants")!,
-        URL(string: "https://api.developer.legrand.com/plants")!,
-        URL(string: "https://api.developer.legrand.com/bticino/v1.0/plants")!,
-        URL(string: "https://api.developer.legrand.com/doorentry/v1.0/plants")!,
-    ]
 }
