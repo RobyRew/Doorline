@@ -132,6 +132,7 @@ final class Classe300XSession {
     private let transport: C300XTransport
     private let shelf: Classe300XShelf
     private let directory: DoorEntryDirectory
+    private let registrar: SipRegistrar?
     private let now: () -> Date
     private var storesSession = true
 
@@ -139,17 +140,20 @@ final class Classe300XSession {
         transport: C300XTransport = PortalTransport(),
         shelf: Classe300XShelf = UserDefaultsShelf(),
         directory: DoorEntryDirectory? = nil,
+        registrar: SipRegistrar? = nil,
         now: @escaping () -> Date = Date.init
     ) {
         self.transport = transport
         self.shelf = shelf
         self.directory = directory ?? EliotDirectory()
+        self.registrar = registrar
         self.now = now
         rememberedEmail = UserDefaults.standard.string(forKey: Self.rememberedEmailKey) ?? ""
         restore(shelf.load())
+        registrar?.start()
     }
 
-    static let shared = Classe300XSession()
+    static let shared = Classe300XSession(registrar: makeSipRegistrar())
 
     var currentCamera: EntranceCamera? {
         cameras.first { $0.id == currentCameraID }
@@ -159,6 +163,9 @@ final class Classe300XSession {
         if case .saved(let link) = association { return link }
         return nil
     }
+
+    /// SIP registration state from the registrar, or `.idle` when none is wired (tests, macOS).
+    var sipRegistration: SipRegistrationState { registrar?.registration ?? .idle }
 
     func associate(account: String, plantID: String, gatewayID: String) async {
         let account = account.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -199,6 +206,20 @@ final class Classe300XSession {
                 return
             }
             await associate(account: email, plantID: plant.plantID, gatewayID: plant.gatewayID)
+            await connectSip(plantID: plant.plantID, gatewayID: plant.gatewayID)
+        }
+    }
+
+    /// Reads the SIP account for the signed-in gateway and registers it. Requires a registrar and
+    /// a directory that can provision SIP (the live `EliotDirectory`); otherwise it is a no-op.
+    private func connectSip(plantID: String, gatewayID: String) async {
+        guard let registrar, let credentials = directory as? SipCredentials else { return }
+        do {
+            let account = try await credentials.sipAccount(plantID: plantID, gatewayID: gatewayID)
+            registrar.register(account)
+        } catch {
+            // The registrar keeps its own state; a provisioning failure leaves it unregistered
+            // rather than reporting the sign-in as failed.
         }
     }
 
@@ -208,6 +229,7 @@ final class Classe300XSession {
         cameras = []
         currentCameraID = nil
         playingMessageID = nil
+        registrar?.unregister()
         persist()
     }
 

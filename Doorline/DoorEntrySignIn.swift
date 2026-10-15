@@ -193,10 +193,18 @@ enum EliotAccountPage {
 }
 
 @MainActor
-final class EliotDirectory: DoorEntryDirectory {
+final class EliotDirectory: DoorEntryDirectory, SipCredentials {
+    private let provisioning: SipProvisioning
+    private(set) var lastToken: String?
+
+    init(provisioning: SipProvisioning = EliotSipProvisioning()) {
+        self.provisioning = provisioning
+    }
+
     func plants(email: String, password: String) async -> Result<[DoorEntryPlant], DoorEntrySignInFailure> {
         do {
             let token = try await accessToken(email: email, password: password)
+            lastToken = token
             let plants = try await plants(token: token)
             if plants.isEmpty { return .failure(.noPlant) }
             return .success(plants)
@@ -209,6 +217,14 @@ final class EliotDirectory: DoorEntryDirectory {
 
     private func accessToken(email: String, password: String) async throws -> String {
         try await EliotWebJourney(wire: URLSessionEliotWire()).submitSignIn(identifier: email, password: password)
+    }
+
+    /// Uses the token from the last sign-in to read the gateway's SIP account.
+    func sipAccount(plantID: String, gatewayID: String) async throws -> SipAccount {
+        guard let token = lastToken else {
+            throw SipProvisioningFailure.unreachable("Sign in before provisioning the SIP account.")
+        }
+        return try await provisioning.sipAccount(plantID: plantID, gatewayID: gatewayID, token: token)
     }
 
     /// Door Entry 1.13.5 stores `prj_name` / `C3X`. The live list is `/eliot/plants`, not the service catalog.
