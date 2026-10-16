@@ -204,6 +204,13 @@ tolerates unauthenticated TLS, make it best-effort; otherwise it is a hard requi
 - Incoming chat messages are matched against known sipUsers (`matching sender with
   sipAccount: `; `nil sipuser, avoid sending message`; `sender mismatch, deleting chat
   room`) and drive the answering-machine conversation.
+- `handleTextMessage` (`0x1000f850c`) parses the incoming body with SwiftyJSON: the
+  document is a JSON dictionary, and the Netatmo doorbell flow reads `params` →
+  `persons` arrays out of it, then issues OWN status requests (`*#8**40*##`) for the
+  camera. So the SIP MESSAGE envelope carries JSON payloads (at least for events);
+  whether the plain `vde_*` commands are sent raw or wrapped in JSON is still open —
+  the `sendMessageToAddress` body builder joins `msg: <text>, addr: <address>` with
+  whatever string the caller hands it.
 - Message strings in the binary: `action_activations`, `action_aswm_enable`,
   `action_aswm_disable`, `action_gateway_update`, plus Doorline's already-known
   `ACTION action_aswm_play id=<id>`. The answering machine also has an
