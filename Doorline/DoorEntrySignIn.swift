@@ -193,12 +193,28 @@ enum EliotAccountPage {
 }
 
 @MainActor
-final class EliotDirectory: DoorEntryDirectory, SipCredentials {
+final class EliotDirectory: DoorEntryDirectory, SipCredentials, PortalTokenProviding, SipCertificateProvisioning {
     private let provisioning: SipProvisioning
+    private let certificateProvisioning: SipCertificateProvisioner
     private(set) var lastToken: String?
 
-    init(provisioning: SipProvisioning = EliotSipProvisioning()) {
+    init(
+        provisioning: SipProvisioning = EliotSipProvisioning(),
+        // Optional because default arguments evaluate outside this actor's isolation,
+        // which a MainActor-isolated initializer call would not be allowed in.
+        certificateProvisioning: SipCertificateProvisioner? = nil
+    ) {
         self.provisioning = provisioning
+        self.certificateProvisioning = certificateProvisioning ?? SipCertificateProvisioner()
+    }
+
+    var portalToken: String? { lastToken }
+
+    func ensureMaterial(deviceName: String) async throws {
+        guard let token = lastToken else {
+            throw CertificateProvisioningFailure.unreachable("Sign in before provisioning the SIP certificate.")
+        }
+        _ = try await certificateProvisioning.ensureMaterial(deviceName: deviceName, token: token)
     }
 
     func plants(email: String, password: String) async -> Result<[DoorEntryPlant], DoorEntrySignInFailure> {

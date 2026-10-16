@@ -861,6 +861,23 @@ struct ClasseSettingsView: View {
                         LabeledContent("Plant", value: link.plantID)
                         LabeledContent("Gateway", value: link.gatewayID)
                     }
+                    Section("Panel connection") {
+                        TextField("Panel address (OWN port 20000)", text: Binding(
+                            get: { session.panelHost },
+                            set: { host in session.setPanelHost(host) }
+                        ))
+                        .textContentType(.URL)
+                        #if os(iOS)
+                        .keyboardType(.URL)
+                        .autocorrectionDisabled()
+                        #endif
+                        .onSubmit {
+                            Task { await session.openPanelSession() }
+                        }
+                        Text("Bus commands go to this address on port 20000. Leave empty to keep them queued.")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    }
                     Section("Call forwarding") {
                         Picker("Forwarding", selection: Binding(
                             get: { session.forwarding },

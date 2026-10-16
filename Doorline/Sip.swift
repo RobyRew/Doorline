@@ -76,7 +76,9 @@ struct EliotSipProvisioning: SipProvisioning {
 /// each value is looked up under the spellings seen across Door Entry payloads, and the account
 /// object is found wherever it sits in the response (some portals wrap it in an envelope).
 enum SipAccountDocument {
-    static let usernameKeys = ["username", "sipUsername", "sip_username", "user", "sip_user", "login"]
+    // The Door Entry 1.13.5 sip-users document spells the user as `sipUser`/`sipAccount`
+    // and the password as `sipPassword` (SipRepository.swift strings in the binary).
+    static let usernameKeys = ["username", "sipUsername", "sip_username", "sipUser", "sipAccount", "user", "sip_user", "login"]
     static let passwordKeys = ["password", "sipPassword", "sip_password", "passwd", "secret"]
     static let domainKeys = ["domain", "sipDomain", "sip_domain", "realm"]
     static let proxyKeys = ["proxy", "sipProxy", "sip_proxy", "registrar", "server", "sipServer", "outboundProxy"]
@@ -157,9 +159,32 @@ enum SipRegistrationState: Equatable, Sendable {
     case failed(String)
 }
 
+/// Call control and the SIP MESSAGE channel, alongside registration.
+///
+/// Door Entry 1.13.5 answers with audio in both directions and video receive-only (the
+/// phone never sends video), and carries the answering-machine and door commands as SIP
+/// MESSAGE bodies of the form `msg: <body>, addr: <address>` to the gateway's SIP user.
+@MainActor
+protocol SipCallControl: AnyObject {
+    /// Called with the caller display string when an INVITE arrives.
+    var onIncomingCall: ((String) -> Void)? { get set }
+    /// Called when the linphone call ends for any reason (remote hang-up, error, our end).
+    var onCallEnded: (() -> Void)? { get set }
+    /// Called with the body of a SIP MESSAGE received from the gateway.
+    var onMessageBody: ((String) -> Void)? { get set }
+
+    func answer()
+    func decline()
+    func endCall()
+    /// Dials the internal unit (`sip:c300x@{domain}` for the registered account).
+    func callHome()
+    /// Sends a SIP MESSAGE to the gateway's SIP user.
+    func sendMessage(_ body: String)
+}
+
 /// Registers a `SipAccount` with a SIP stack and reports the registration state.
 @MainActor
-protocol SipRegistrar: AnyObject {
+protocol SipRegistrar: SipCallControl {
     var registration: SipRegistrationState { get }
     func start()
     func register(_ account: SipAccount)
@@ -171,7 +196,21 @@ protocol SipRegistrar: AnyObject {
 @MainActor
 final class StubSipRegistrar: SipRegistrar {
     private(set) var registration: SipRegistrationState = .idle
+    var onIncomingCall: ((String) -> Void)?
+    var onCallEnded: (() -> Void)?
+    var onMessageBody: ((String) -> Void)?
+    private(set) var answered = false
+    private(set) var declined = false
+    private(set) var ended = false
+    private(set) var calledHome = false
+    private(set) var sentMessages: [String] = []
+
     func start() {}
     func register(_ account: SipAccount) { registration = .idle }
     func unregister() { registration = .idle }
+    func answer() { answered = true }
+    func decline() { declined = true }
+    func endCall() { ended = true }
+    func callHome() { calledHome = true }
+    func sendMessage(_ body: String) { sentMessages.append(body) }
 }

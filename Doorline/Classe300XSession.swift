@@ -74,6 +74,8 @@ struct Classe300XSnapshot: Codable, Equatable, Sendable {
     var account = ""
     var plantID = ""
     var gatewayID = ""
+    /// Panel address the OWN frames are sent to (OpenWebNet port 20000). Empty until set.
+    var panelHost = ""
     var forwarding: ForwardingMode = .blocked
     var professionalStudio = false
     var answeringMachineEnabled = false
@@ -128,8 +130,11 @@ final class Classe300XSession {
     private(set) var sent: [C300XFrame] = []
     private(set) var lastReceipt: C300XReceipt = .queued
     private(set) var rememberedEmail: String
+    /// Panel address the OWN frames are sent to. Empty until the user sets one.
+    private(set) var panelHost: String = ""
 
     private let transport: C300XTransport
+    private let router: RouterTransport?
     private let shelf: Classe300XShelf
     private let directory: DoorEntryDirectory
     private let registrar: SipRegistrar?
@@ -137,13 +142,14 @@ final class Classe300XSession {
     private var storesSession = true
 
     init(
-        transport: C300XTransport = PortalTransport(),
+        transport: C300XTransport = RouterTransport(),
         shelf: Classe300XShelf = UserDefaultsShelf(),
         directory: DoorEntryDirectory? = nil,
         registrar: SipRegistrar? = nil,
         now: @escaping () -> Date = Date.init
     ) {
         self.transport = transport
+        self.router = transport as? RouterTransport
         self.shelf = shelf
         self.directory = directory ?? EliotDirectory()
         self.registrar = registrar
@@ -151,6 +157,28 @@ final class Classe300XSession {
         rememberedEmail = UserDefaults.standard.string(forKey: Self.rememberedEmailKey) ?? ""
         restore(shelf.load())
         registrar?.start()
+        registrar?.onIncomingCall = { [weak self] caller in
+            Task { @MainActor in await self?.receiveRing(caller: caller) }
+        }
+        registrar?.onCallEnded = { [weak self] in
+            Task { @MainActor in
+                guard let self else { return }
+                self.call = CallState()
+                self.persist()
+            }
+        }
+        registrar?.onMessageBody = { [weak self] body in
+            Task { @MainActor in self?.ingestGatewayMessage(body) }
+        }
+    }
+
+    /// Strips Door Entry's `msg: <body>, addr: <address>` envelope and parses the body.
+    private func ingestGatewayMessage(_ envelope: String) {
+        var body = envelope
+        if body.hasPrefix("msg: "), let separator = body.range(of: ", addr: ") {
+            body = String(body[body.index(body.startIndex, offsetBy: 5)..<separator.lowerBound])
+        }
+        ingestMessages(body)
     }
 
     static let shared = Classe300XSession(registrar: makeSipRegistrar())
@@ -212,9 +240,16 @@ final class Classe300XSession {
 
     /// Reads the SIP account for the signed-in gateway and registers it. Requires a registrar and
     /// a directory that can provision SIP (the live `EliotDirectory`); otherwise it is a no-op.
+    ///
+    /// Door Entry refuses to register without a client certificate, so the certificate is
+    /// provisioned first when the directory can do it. A provisioning failure leaves the
+    /// registrar unregistered rather than reporting the sign-in as failed.
     private func connectSip(plantID: String, gatewayID: String) async {
         guard let registrar, let credentials = directory as? SipCredentials else { return }
         do {
+            if let certificate = directory as? SipCertificateProvisioning {
+                try? await certificate.ensureMaterial(deviceName: "doorline")
+            }
             let account = try await credentials.sipAccount(plantID: plantID, gatewayID: gatewayID)
             registrar.register(account)
         } catch {
@@ -245,32 +280,51 @@ final class Classe300XSession {
     }
 
     func answer() async {
-        guard call.phase == .ringing, let link else { return }
+        guard call.phase == .ringing else { return }
         call.phase = .active
         call.audioLive = true
         call.videoLive = true
-        await emit(.callAnswer, C300XCodec.answer(plant: link.plantID))
+        registrar?.answer()
+        await emit(.callAnswer, C300XCodec.answer(plant: link?.plantID ?? ""))
     }
 
     func decline() async {
-        guard call.phase == .ringing, let link else { return }
+        guard call.phase == .ringing else { return }
         call.phase = .declined
         call.audioLive = false
         call.videoLive = false
-        await emit(.callDecline, C300XCodec.decline(plant: link.plantID))
+        registrar?.decline()
+        await emit(.callDecline, C300XCodec.decline(plant: link?.plantID ?? ""))
     }
 
     func endCall() {
         guard call.phase == .active || call.phase == .declined else { return }
         call = CallState()
+        registrar?.endCall()
     }
 
     func callHome() async {
-        guard let link, call.phase == .idle || call.phase == .declined else { return }
+        guard link != nil, call.phase == .idle || call.phase == .declined else { return }
         call = CallState(phase: .active, direction: .callHome, audioLive: true, videoLive: false, caller: "Internal unit")
         record(.call, "Internal unit")
-        await emit(.callHome, C300XCodec.callHome(plant: link.plantID))
+        registrar?.callHome()
+        await emit(.callHome, C300XCodec.callHome(plant: link?.plantID ?? ""))
         persist()
+    }
+
+    /// Sets the panel address the OWN frames are sent to. The session-open handshake is a
+    /// separate step so editing the field does not reconnect per keystroke.
+    func setPanelHost(_ host: String) {
+        let trimmed = host.trimmingCharacters(in: .whitespaces)
+        guard trimmed != panelHost else { return }
+        panelHost = trimmed
+        router?.setPanelHost(trimmed)
+        persist()
+    }
+
+    func openPanelSession() async {
+        guard !panelHost.isEmpty else { return }
+        await emit(.sessionOpen, C300XCodec.sessionOpen)
     }
 
     func selectCamera(_ id: String) async {
@@ -283,6 +337,9 @@ final class Classe300XSession {
     func releaseDoorLock() async {
         guard link != nil else { return }
         record(.unlock, "Door lock")
+        // Door Entry sends the lock as `vde_doorlock_entr_*` over SIP MESSAGE when the
+        // panel is not on the local bus; the OWN frame stays for the local link.
+        registrar?.sendMessage("vde_doorlock_entr_remote")
         await emit(.doorLock, C300XCodec.doorLock())
         persist()
     }
@@ -295,6 +352,9 @@ final class Classe300XSession {
     func setAnsweringMachineEnabled(_ enabled: Bool) async {
         guard link != nil else { return }
         answeringMachineEnabled = enabled
+        // Door Entry sends the switch over the SIP MESSAGE channel as `vde_aswm_enabled`
+        // / `vde_aswm_disabled`; the bus frame stays for a direct link.
+        registrar?.sendMessage(enabled ? "vde_aswm_enabled" : "vde_aswm_disabled")
         await emit(.answeringMachine, C300XCodec.answeringMachine(enabled: enabled))
         persist()
     }
@@ -312,6 +372,7 @@ final class Classe300XSession {
     func playMessage(_ id: String) async {
         guard messages.contains(where: { $0.id == id }) else { return }
         playingMessageID = id
+        registrar?.sendMessage("ACTION action_aswm_play id=\(id)")
         await emit(.playMessage, C300XCodec.playMessage(id: id))
     }
 
@@ -352,6 +413,7 @@ final class Classe300XSession {
             snapshot.plantID = link.plantID
             snapshot.gatewayID = link.gatewayID
         }
+        snapshot.panelHost = panelHost
         snapshot.forwarding = forwarding
         snapshot.professionalStudio = professionalStudio
         snapshot.answeringMachineEnabled = answeringMachineEnabled
@@ -374,6 +436,8 @@ final class Classe300XSession {
                 EntranceCamera(id: C300XCodec.secondaryCameraAddress, name: "Secondary"),
             ]
         }
+        panelHost = snapshot.panelHost
+        router?.setPanelHost(snapshot.panelHost)
         forwarding = snapshot.forwarding
         professionalStudio = snapshot.professionalStudio
         answeringMachineEnabled = snapshot.answeringMachineEnabled

@@ -22,7 +22,8 @@ Liquid Glass is used for the entrance controls when the SDK you compile with dec
 2. Select the Doorline target and set your Team.
 3. Run on your iPhone, iPad, or Mac.
 4. On Entrance, sign in with the same email and password as Door Entry. Eliot returns the Classe 300X on that account.
-5. On iPhone or iPad, open Home if you also want a HomeKit lock. Allow Home access when asked, then pick the lock, camera, and contact sensor.
+5. Set the panel address in Entrance › panel connection when you want the bus commands (door lock, actuator, cameras, answering machine) to reach the panel directly over OpenWebNet on port 20000. Leave it empty and they stay queued.
+6. On iPhone or iPad, open Home if you also want a HomeKit lock. Allow Home access when asked, then pick the lock, camera, and contact sensor.
 
 ## Siri
 
@@ -47,8 +48,16 @@ Doorline/DoorGlass.swift           Liquid Glass, or a system material
 Doorline/HomeStore.swift           HomeKit reads and writes
 Doorline/EntranceView.swift        Home camera still, lock, sensor, picker
 Doorline/DoorIntents.swift         Siri intents and shortcuts
+Doorline/Sip.swift                 SIP account, provisioning, registrar protocol
+Doorline/LinphoneManager.swift     liblinphone core: registration and calls
+Doorline/SipCertificateStore.swift Keychain PEM for the SIP client certificate
+Doorline/SipCertificateProvisioner.swift CSR signing via the Door Entry portal
+Doorline/CertificateSigningRequest.swift PKCS#10 builder
+Doorline/OwnTransport.swift        OpenWebNet TCP to the panel (port 20000)
+Doorline/RouterTransport.swift     routes frames to portal or panel
 Doorline/Theme.swift               colors
-DoorlineTests/                     session tests
+DoorlineTests/                     session, OWN, and CSR tests
+docs/reverse-engineering.md        Door Entry 1.13.5 findings and gaps
 .github/workflows/ci.yml           unsigned iOS and macOS builds
 ```
 

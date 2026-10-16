@@ -135,6 +135,84 @@ final class Classe300XSessionTests: XCTestCase {
         XCTAssertTrue(session.sent.isEmpty)
     }
 
+    func testAnswerDeclineEndAndCallHomeReachTheRegistrar() async {
+        let registrar = StubSipRegistrar()
+        let session = make(registrar: registrar)
+        await session.associate(account: "ada@example.com", plantID: "1001", gatewayID: "gw-1")
+        await session.receiveRing(caller: "Entrance")
+        await session.answer()
+        XCTAssertTrue(registrar.answered)
+        session.endCall()
+        XCTAssertTrue(registrar.ended)
+        await session.receiveRing(caller: "Entrance")
+        await session.decline()
+        XCTAssertTrue(registrar.declined)
+        await session.callHome()
+        XCTAssertTrue(registrar.calledHome)
+    }
+
+    func testAnsweringMachineControlsGoOverTheSipMessageChannel() async {
+        let registrar = StubSipRegistrar()
+        let session = make(registrar: registrar)
+        await session.associate(account: "ada@example.com", plantID: "1001", gatewayID: "gw-1")
+        await session.setAnsweringMachineEnabled(false)
+        XCTAssertEqual(registrar.sentMessages.last, "vde_aswm_disabled")
+        await session.setAnsweringMachineEnabled(true)
+        XCTAssertEqual(registrar.sentMessages.last, "vde_aswm_enabled")
+        let message = AnsweringMessage(id: "m1", recordedAt: Date(timeIntervalSince1970: 1_700_000_000), caller: "Entrance")
+        session.ingestMessages(C300XCodec.messageList([message]))
+        await session.playMessage("m1")
+        XCTAssertEqual(registrar.sentMessages.last, "ACTION action_aswm_play id=m1")
+    }
+
+    func testPanelHostPersistsAndRoutesOwnFrames() async {
+        let router = RouterTransport()
+        let session = Classe300XSession(transport: router, shelf: MemoryShelf(), directory: DocumentDirectory(document: Data()))
+        await session.associate(account: "ada@example.com", plantID: "1001", gatewayID: "gw-1")
+        session.setPanelHost("192.168.1.40")
+        XCTAssertEqual(session.panelHost, "192.168.1.40")
+        XCTAssertEqual(router.panelHost, "192.168.1.40")
+
+        let restored = Classe300XSession(transport: router, shelf: MemoryShelf(), directory: DocumentDirectory(document: Data()))
+        XCTAssertEqual(restored.panelHost, "")
+
+        let shelf = UserDefaultsShelf()
+        let persisted = Classe300XSession(transport: RouterTransport(), shelf: shelf, directory: DocumentDirectory(document: Data()))
+        persisted.setPanelHost("192.168.1.41")
+        let again = Classe300XSession(transport: RouterTransport(), shelf: shelf, directory: DocumentDirectory(document: Data()))
+        XCTAssertEqual(again.panelHost, "192.168.1.41")
+        again.setPanelHost("")
+        XCTAssertEqual(again.panelHost, "")
+    }
+
+    func testRegistrarIncomingCallRingsTheSession() async {
+        let registrar = StubSipRegistrar()
+        let session = make(registrar: registrar)
+        await session.associate(account: "ada@example.com", plantID: "1001", gatewayID: "gw-1")
+        registrar.onIncomingCall?("Gate")
+        await flush()
+        XCTAssertEqual(session.call.phase, .ringing)
+        XCTAssertEqual(session.call.caller, "Gate")
+        registrar.onCallEnded?()
+        await flush()
+        XCTAssertEqual(session.call.phase, .idle)
+    }
+
+    func testGatewayMessageBodyIsIngestedAsTheMessageList() async {
+        let registrar = StubSipRegistrar()
+        let session = make(registrar: registrar)
+        await session.associate(account: "ada@example.com", plantID: "1001", gatewayID: "gw-1")
+        let body = "msg: ASWM\tm7\t2026-10-01T10:00:00Z\tGate, addr: sip:c300x@1001.bs.iotleg.com"
+        registrar.onMessageBody?(body)
+        await flush()
+        XCTAssertEqual(session.messages.map(\.id), ["m7"])
+        XCTAssertEqual(session.messages.first?.caller, "Gate")
+    }
+
+    private func flush() async {
+        for _ in 0..<3 { await Task.yield() }
+    }
+
     func testSignInReadsThePlantFromTheAccountDocument() async {
         let document = Data(#"{"plants":[{"id":"plant-7","name":"Home","gateways":[{"id":"gw-3"}]}]}"#.utf8)
         let session = make(directory: DocumentDirectory(document: document))
@@ -197,6 +275,10 @@ final class Classe300XSessionTests: XCTestCase {
 
     private func make(directory: DoorEntryDirectory) -> Classe300XSession {
         Classe300XSession(transport: QueuedTransport(), shelf: MemoryShelf(), directory: directory)
+    }
+
+    private func make(registrar: StubSipRegistrar) -> Classe300XSession {
+        Classe300XSession(transport: QueuedTransport(), shelf: MemoryShelf(), directory: DocumentDirectory(document: Data()), registrar: registrar)
     }
 }
 
