@@ -1,0 +1,171 @@
+name: Release
+
+# Publishes a GitHub release with one IPA for each device OS and a DMG for Mac.
+# iPhone and iPad share Doorline-iOS-iPadOS.ipa.
+#
+# Push a tag, or run this workflow by hand:
+#   git tag v1.0.6 && git push origin v1.0.6
+#   gh workflow run release.yml -f tag=v1.0.6
+#
+# The archives are unsigned. A Mac opens the DMG. An iPhone, iPad, Watch, or
+# Vision install still needs your own signing.
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Release tag, for example v1.0.6
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: ${{ matrix.name }}
+    runs-on: macos-15
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: iOS and iPadOS
+            destination: generic/platform=iOS
+            products: Release-iphoneos
+            kind: ipa
+            file: Doorline-iOS-iPadOS.ipa
+          - name: watchOS
+            destination: generic/platform=watchOS
+            products: Release-watchos
+            kind: ipa
+            file: Doorline-watchOS.ipa
+          - name: visionOS
+            destination: generic/platform=visionOS
+            products: Release-xros
+            kind: ipa
+            file: Doorline-visionOS.ipa
+          - name: macOS
+            destination: platform=macOS
+            products: Release
+            kind: dmg
+            file: Doorline-macOS.dmg
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Select the newest Xcode on the runner
+        run: |
+          set -euo pipefail
+          latest="$(ls -d /Applications/Xcode*.app | sort -V | tail -1)"
+          sudo xcode-select -s "$latest"
+          xcodebuild -version
+          xcodebuild -showsdks
+
+      - name: Release version from the tag
+        id: version
+        env:
+          RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+        run: |
+          set -euo pipefail
+          case "$RELEASE_TAG" in
+            v*) ;;
+            *) echo "Tag must look like v1.0.6, got $RELEASE_TAG" >&2; exit 1 ;;
+          esac
+          echo "marketing=${RELEASE_TAG#v}" >> "$GITHUB_OUTPUT"
+          echo "tag=$RELEASE_TAG" >> "$GITHUB_OUTPUT"
+
+      - name: Build ${{ matrix.name }}
+        run: |
+          set -euo pipefail
+          xcodebuild \
+            -project Doorline.xcodeproj \
+            -scheme Doorline \
+            -configuration Release \
+            -destination '${{ matrix.destination }}' \
+            -derivedDataPath DerivedData \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            MARKETING_VERSION="${{ steps.version.outputs.marketing }}" \
+            CURRENT_PROJECT_VERSION="${{ github.run_number }}" \
+            build
+
+      - name: Package ${{ matrix.file }}
+        run: |
+          set -euo pipefail
+          chmod +x scripts/release-package.sh
+          app="DerivedData/Build/Products/${{ matrix.products }}/Doorline.app"
+          if [[ ! -d "$app" ]]; then
+            echo "Doorline.app was not at $app" >&2
+            find DerivedData/Build/Products -name 'Doorline.app' -maxdepth 3 >&2 || true
+            exit 1
+          fi
+          mkdir -p dist
+          scripts/release-package.sh "${{ matrix.kind }}" "$app" "dist/${{ matrix.file }}"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.file }}
+          path: dist/${{ matrix.file }}
+          if-no-files-found: error
+
+  publish:
+    name: GitHub release
+    needs: build
+    runs-on: macos-15
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Checksums
+        run: |
+          set -euo pipefail
+          cd dist
+          shasum -a 256 Doorline-iOS-iPadOS.ipa Doorline-watchOS.ipa Doorline-visionOS.ipa Doorline-macOS.dmg > SHA256SUMS
+          cat SHA256SUMS
+
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+        run: |
+          set -euo pipefail
+          case "$RELEASE_TAG" in
+            v*) ;;
+            *) echo "Tag must look like v1.0.6, got $RELEASE_TAG" >&2; exit 1 ;;
+          esac
+          notes="$(mktemp)"
+          cat > "$notes" <<EOF
+          Doorline ${RELEASE_TAG}
+
+          - \`Doorline-iOS-iPadOS.ipa\` is the iPhone and iPad app.
+          - \`Doorline-watchOS.ipa\` is the Apple Watch app.
+          - \`Doorline-visionOS.ipa\` is the Apple Vision app.
+          - \`Doorline-macOS.dmg\` is the Mac app.
+          - \`SHA256SUMS\` lists the file hashes.
+
+          These builds are unsigned. Open the DMG on a Mac. An iPhone, iPad, Watch, or Vision install needs your own signing.
+          EOF
+          files=(
+            dist/Doorline-iOS-iPadOS.ipa
+            dist/Doorline-watchOS.ipa
+            dist/Doorline-visionOS.ipa
+            dist/Doorline-macOS.dmg
+            dist/SHA256SUMS
+          )
+          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            gh release upload "$RELEASE_TAG" "${files[@]}" --clobber
+            gh release edit "$RELEASE_TAG" --notes-file "$notes"
+          else
+            gh release create "$RELEASE_TAG" "${files[@]}" \
+              --title "Doorline ${RELEASE_TAG}" \
+              --notes-file "$notes" \
+              --target "${GITHUB_SHA}"
+          fi
