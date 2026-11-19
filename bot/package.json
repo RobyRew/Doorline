@@ -1,0 +1,14 @@
+{
+  "name": "@robyrew/door-bot",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./index.ts",
+    "./http": "./http.ts",
+    "./portal": "./portal.ts"
+  },
+  "dependencies": {
+    "@robyrew/bot-sdk": "file:../../robyrew-bot/sdk"
+  }
+}
