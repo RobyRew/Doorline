@@ -68,12 +68,24 @@ final class OwnTransport: C300XTransport, @unchecked Sendable {
         }
         connection.start(queue: queue)
         receive(on: connection)
+        // A port that never accepts stays in `.waiting` and would leave the command open.
+        let work = DispatchWorkItem { [weak self] in
+            guard let self, self.connection?.state != .ready else { return }
+            self.failAll("The panel did not accept the connection.")
+        }
+        timeout = work
+        queue.asyncAfter(deadline: .now() + 4, execute: work)
     }
 
     private func handle(_ state: NWConnection.State) {
         switch state {
         case .ready:
+            timeout?.cancel()
             pump()
+        case .waiting(let error):
+            if case .posix(let code) = error, code == .ECONNREFUSED {
+                failAll("The panel did not accept the connection.")
+            }
         case .failed, .cancelled:
             failAll("The panel did not accept the connection.")
         default:

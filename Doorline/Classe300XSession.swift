@@ -213,7 +213,7 @@ final class Classe300XSession {
     }
 
     /// Door Entry sign-in. The directory returns the plant and gateway for this email; the screen does not ask for them.
-    func signIn(email: String, password: String, keepSignedIn: Bool = true) async {
+    func signIn(email: String, password: String, keepSignedIn: Bool = true, product: DoorProduct = .classe300X) async {
         let email = email.trimmingCharacters(in: .whitespacesAndNewlines)
         let password = password.trimmingCharacters(in: .whitespacesAndNewlines)
         guard email.contains("@"), !password.isEmpty else {
@@ -225,7 +225,8 @@ final class Classe300XSession {
             rememberedEmail = email
             UserDefaults.standard.set(email, forKey: Self.rememberedEmailKey)
         }
-        switch await directory.plants(email: email, password: password) {
+        product.store()
+        switch await directory.plants(email: email, password: password, product: product) {
         case .failure(let failure):
             lastReceipt = .rejected(failure.message)
         case .success(let plants):

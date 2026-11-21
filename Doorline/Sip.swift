@@ -48,22 +48,33 @@ protocol SipProvisioning: Sendable {
     func sipAccount(plantID: String, gatewayID: String, token: String) async throws -> SipAccount
 }
 
-/// `GET {host}/sip/users/plants/{plant}/gateway/{gateway}` with the Eliot bearer token and
-/// `PRJ_NAME: C3X`, the same portal and headers Door Entry's plant list uses.
-struct EliotSipProvisioning: SipProvisioning {
+/// `GET {host}/eliot/sip/users/plants/{plant}/gateway/{gateway}`.
+/// Door Entry 1.13.6 prefixes portal actions with `/eliot` and sends `prj_name`.
+/// A portal sign-in passes `auth_token` and the cookie jar from that sign-in.
+/// An Eliot sign-in (Classe 100X, EasyKit) sends the access token as a bearer.
+final class EliotSipProvisioning: SipProvisioning, @unchecked Sendable {
     var host: String = "https://www.myhomeweb.com"
-    var userAgent: String = "doorentryforc300x-ios-1.13.5"
+    var userAgent: String = "doorentryforc300x-ios-1.13.6"
+    var projectName: String = "C3X"
+    var session: URLSession = .shared
+    var authToken: String?
+    var sendsBearer = false
 
     func sipAccount(plantID: String, gatewayID: String, token: String) async throws -> SipAccount {
-        guard let url = URL(string: "\(host)/sip/users/plants/\(plantID)/gateway/\(gatewayID)") else {
+        guard let url = URL(string: "\(host)/eliot/sip/users/plants/\(plantID)/gateway/\(gatewayID)") else {
             throw SipProvisioningFailure.unreachable("SIP users URL could not be built.")
         }
         var request = URLRequest(url: url, timeoutInterval: 20)
-        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         request.setValue("application/json", forHTTPHeaderField: "Accept")
-        request.setValue("C3X", forHTTPHeaderField: "PRJ_NAME")
+        request.setValue(projectName, forHTTPHeaderField: "prj_name")
         request.setValue(userAgent, forHTTPHeaderField: "User-Agent")
-        let (data, response) = try await URLSession.shared.data(for: request)
+        if let authToken {
+            request.setValue(authToken, forHTTPHeaderField: "auth_token")
+        }
+        if sendsBearer {
+            request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        }
+        let (data, response) = try await session.data(for: request)
         let status = (response as? HTTPURLResponse)?.statusCode ?? 0
         guard (200..<300).contains(status) else {
             throw SipProvisioningFailure.unreachable("SIP provisioning answered HTTP \(status).")

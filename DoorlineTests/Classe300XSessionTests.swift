@@ -244,7 +244,7 @@ final class Classe300XSessionTests: XCTestCase {
         )
         XCTAssertEqual(
             result,
-            .failure(.unreachable("Signed in to Eliot. Door Entry's portal answered User not logged or session expired."))
+            .failure(.unreachable("The portal answered User not logged or session expired."))
         )
     }
 
@@ -260,6 +260,38 @@ final class Classe300XSessionTests: XCTestCase {
         let modules = Data(#"{"modules":[{"id":"gw-9","device":"gateway"},{"id":"lock-1","device":"lock"}]}"#.utf8)
         XCTAssertEqual(DoorEntryAccountDocument.gatewayID(in: modules), "gw-9")
         XCTAssertTrue(DoorEntryAccountDocument.catalogPlants(in: Data()).isEmpty)
+    }
+
+    func testPortalSignInPostsThePasswordAsPwdForTheSelectedProduct() throws {
+        let body = PortalSignIn.jsonBody(
+            username: "ada@example.com",
+            password: "secret",
+            profile: DoorProduct.classe300X.portal!
+        )
+        let json = try XCTUnwrap(JSONSerialization.jsonObject(with: body) as? [String: Any])
+        XCTAssertEqual(json["username"] as? String, "ada@example.com")
+        XCTAssertEqual(json["pwd"] as? String, "secret")
+        XCTAssertEqual(json["brand"] as? String, "C3X")
+        XCTAssertEqual(json["appVersion"] as? String, "1.13.6")
+        XCTAssertEqual(DoorProduct.homeTouch.portal?.projectName, "MHT")
+        XCTAssertNil(DoorProduct.classe100X.portal)
+        XCTAssertEqual(DoorProduct.easyKit.eliotClient.redirect, "com.legrandgroup.diy://oauth2redirect")
+    }
+
+    func testPortalSignInTreats401AsARejectedPassword() {
+        let result = PortalSignIn.outcome(status: 401, warning: "", body: Data())
+        XCTAssertEqual(result, .failure(.invalidCredentials("That email or password was not accepted.")))
+    }
+
+    func testPortalSignInReadsATokenAndPlantFromTheBody() {
+        let body = Data(#"{"auth_token":"portal-token","plants":[{"id":"plant-1","name":"Home","gateways":[{"id":"gw-9"}]}]}"#.utf8)
+        XCTAssertEqual(
+            PortalSignIn.outcome(status: 200, warning: "", body: body),
+            .success(PortalSignIn.Ticket(
+                token: "portal-token",
+                plants: [DoorEntryPlant(plantID: "plant-1", gatewayID: "gw-9", name: "Home")]
+            ))
+        )
     }
 
     func testEmptyPasswordDoesNotAskForTheAccount() async {
@@ -287,7 +319,7 @@ private final class DocumentDirectory: DoorEntryDirectory {
     let document: Data
     init(document: Data) { self.document = document }
 
-    func plants(email: String, password: String) async -> Result<[DoorEntryPlant], DoorEntrySignInFailure> {
+    func plants(email: String, password: String, product: DoorProduct) async -> Result<[DoorEntryPlant], DoorEntrySignInFailure> {
         let plants = DoorEntryAccountDocument.plants(in: document)
         return plants.isEmpty ? .failure(.noPlant) : .success(plants)
     }
@@ -295,7 +327,7 @@ private final class DocumentDirectory: DoorEntryDirectory {
 
 @MainActor
 private final class TrapDirectory: DoorEntryDirectory {
-    func plants(email: String, password: String) async -> Result<[DoorEntryPlant], DoorEntrySignInFailure> {
+    func plants(email: String, password: String, product: DoorProduct) async -> Result<[DoorEntryPlant], DoorEntrySignInFailure> {
         .success([DoorEntryPlant(plantID: "should-not", gatewayID: "should-not", name: "No")])
     }
 }

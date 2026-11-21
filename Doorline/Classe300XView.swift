@@ -113,6 +113,7 @@ struct ClasseEntranceView: View {
     @State private var showReset = false
     @State private var showRegister = false
     @State private var working = false
+    @State private var product = DoorProduct.stored
 
     private var ringing: Binding<Bool> {
         Binding(
@@ -159,12 +160,12 @@ struct ClasseEntranceView: View {
             }
             .sheet(isPresented: $showReset) {
                 EliotClaimsSheet(title: "Reset password") { journey in
-                    try await journey.loadPasswordReset()
+                    try await journey.loadPasswordReset(client: product.eliotClient)
                 }
             }
             .sheet(isPresented: $showRegister) {
                 EliotClaimsSheet(title: "Create account") { journey in
-                    try await journey.loadRegistration()
+                    try await journey.loadRegistration(client: product.eliotClient)
                 }
             }
             #if os(iOS)
@@ -187,8 +188,17 @@ struct ClasseEntranceView: View {
             VStack(alignment: .leading, spacing: 18) {
                 Text("Sign in")
                     .font(.system(.largeTitle, design: .serif))
-                Text("Use the same email and password as Door Entry. Eliot tells Doorline which Classe 300X is on that account.")
+                Text(product.signInDetail)
                     .foregroundStyle(.secondary)
+                Picker("Door system", selection: $product) {
+                    ForEach(DoorProduct.allCases) { item in
+                        Text(item.title).tag(item)
+                    }
+                }
+                .pickerStyle(.menu)
+                .onChange(of: product) { _, selected in
+                    selected.store()
+                }
                 field("Email", text: $email, prompt: "Email", secure: false, account: true)
                 field("Password", text: $password, prompt: "Password", secure: !showPassword, account: false)
                 Toggle("Show password", isOn: $showPassword)
@@ -367,7 +377,7 @@ struct ClasseEntranceView: View {
 
     private func signIn() async {
         working = true
-        await session.signIn(email: email, password: password, keepSignedIn: keepSignedIn)
+        await session.signIn(email: email, password: password, keepSignedIn: keepSignedIn, product: product)
         if session.link != nil { password = "" }
         working = false
     }

@@ -29,6 +29,8 @@ typealias PlatformImage = UIImage
 #elseif canImport(AppKit)
 import AppKit
 typealias PlatformImage = NSImage
+#else
+struct PlatformImage {}
 #endif
 
 #if canImport(HomeKit)

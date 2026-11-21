@@ -16,7 +16,7 @@ enum DoorEntrySignInFailure: Error, Equatable {
         case .invalidCredentials(let reason):
             reason
         case .noPlant:
-            "That account has no Classe 300X on it."
+            "That account has no door system on it."
         case .unreachable(let reason):
             reason
         }
@@ -43,7 +43,162 @@ enum EliotSelfAsserted {
 
 @MainActor
 protocol DoorEntryDirectory: AnyObject {
-    func plants(email: String, password: String) async -> Result<[DoorEntryPlant], DoorEntrySignInFailure>
+    func plants(email: String, password: String, product: DoorProduct) async -> Result<[DoorEntryPlant], DoorEntrySignInFailure>
+}
+
+/// The door system Doorline is signing in to. Classe 300X is the one the entrance controls;
+/// the others use the same screens with that product's sign-in.
+enum DoorProduct: String, CaseIterable, Identifiable, Sendable {
+    case classe300X
+    case homeTouch
+    case classe100X
+    case easyKit
+
+    var id: String { rawValue }
+
+    static let storageKey = "doorline.product"
+
+    static var stored: DoorProduct {
+        guard let raw = UserDefaults.standard.string(forKey: storageKey),
+              let product = DoorProduct(rawValue: raw) else { return .classe300X }
+        return product
+    }
+
+    func store() {
+        UserDefaults.standard.set(rawValue, forKey: Self.storageKey)
+    }
+
+    var title: String {
+        switch self {
+        case .classe300X: "Classe 300X"
+        case .homeTouch: "Home Touch"
+        case .classe100X: "Classe 100X"
+        case .easyKit: "EasyKit"
+        }
+    }
+
+    var signInDetail: String {
+        switch self {
+        case .classe300X:
+            "Use the same email and password as Door Entry. Doorline signs that account in to the Classe 300X portal and reads the system on it."
+        case .homeTouch:
+            "Use the same email and password as Door Entry for Home Touch. Doorline signs that account in to the Home Touch portal."
+        case .classe100X:
+            "Classe 100X still signs in through Eliot, then reads the service catalog for that account."
+        case .easyKit:
+            "EasyKit still signs in through Eliot, then reads the service catalog for that account."
+        }
+    }
+
+    /// Door Entry 1.13.6 (Classe 300X and Home Touch) posts the account to the portal.
+    /// Eliot web sign-in is not part of those builds.
+    var portal: PortalSignIn.Profile? {
+        switch self {
+        case .classe300X:
+            PortalSignIn.Profile(
+                projectName: "C3X",
+                userAgent: "doorentryforc300x-ios-1.13.6",
+                appVersion: "1.13.6"
+            )
+        case .homeTouch:
+            PortalSignIn.Profile(
+                projectName: "MHT",
+                userAgent: "doorentryforHOMETOUCH-ios-1.13.6",
+                appVersion: "1.13.6"
+            )
+        case .classe100X, .easyKit:
+            nil
+        }
+    }
+
+    /// Classe 100X 1.7.2 and EasyKit 1.7.0 still open an Eliot B2C page.
+    /// The client id is the UUID stored beside that policy in each binary.
+    var eliotClient: EliotClient {
+        switch self {
+        case .classe100X:
+            EliotClient(
+                signInPolicy: "B2C_1_DoorEliot-C100X-SignUporSignIn",
+                passwordPolicy: "B2C_1_DoorEliot-C100X-password",
+                clientID: "89157f0f-9a06-e811-80c2-0003ff433c2c",
+                redirect: "com.legrandgroup.c100x://oauth2redirect"
+            )
+        case .easyKit:
+            EliotClient(
+                signInPolicy: "B2C_1_DoorEliot-DIY-SignUporSignIn",
+                passwordPolicy: "B2C_1_DoorEliot-DIY-Password",
+                clientID: "89157f0f-9a06-e811-80c2-0003ff433c2c",
+                redirect: "com.legrandgroup.diy://oauth2redirect"
+            )
+        case .classe300X, .homeTouch:
+            .classe300X
+        }
+    }
+}
+
+/// Password sign-in against `www.myhomeweb.com/eliot/users/sign_in`.
+/// Door Entry 1.13.6 sends `username`, `pwd`, `appVersion`, `brand`, `registrationId`,
+/// and `tokenPasswordExpired`, with header `prj_name` set to the product (`C3X` or `MHT`).
+enum PortalSignIn {
+    struct Profile: Equatable, Sendable {
+        var projectName: String
+        var userAgent: String
+        var appVersion: String
+    }
+
+    struct Ticket: Equatable, Sendable {
+        var token: String?
+        var plants: [DoorEntryPlant]
+    }
+
+    static func jsonBody(username: String, password: String, profile: Profile) -> Data {
+        let object: [String: Any] = [
+            "username": username,
+            "pwd": password,
+            "appVersion": profile.appVersion,
+            "brand": profile.projectName,
+            "registrationId": "",
+            "tokenPasswordExpired": false,
+        ]
+        return (try? JSONSerialization.data(withJSONObject: object)) ?? Data()
+    }
+
+    /// A rejected password is HTTP 401 with an empty body. Any other failure keeps the portal's warning.
+    static func outcome(status: Int, warning: String, body: Data) -> Result<Ticket, DoorEntrySignInFailure> {
+        if status == 401 || status == 403 {
+            return .failure(.invalidCredentials("That email or password was not accepted."))
+        }
+        guard (200..<300).contains(status) else {
+            let reason = warning.trimmingCharacters(in: .whitespacesAndNewlines)
+            let detail = reason.isEmpty ? "HTTP \(status)" : reason
+            return .failure(.unreachable("The portal answered \(detail)."))
+        }
+        return .success(Ticket(token: token(in: body), plants: DoorEntryAccountDocument.plants(in: body)))
+    }
+
+    static func token(in data: Data) -> String? {
+        guard let json = try? JSONSerialization.jsonObject(with: data) else { return nil }
+        return token(in: json)
+    }
+
+    private static func token(in value: Any) -> String? {
+        if let object = value as? [String: Any] {
+            for key in ["auth_token", "authToken", "token"] {
+                if let string = object[key] as? String {
+                    let trimmed = string.trimmingCharacters(in: .whitespacesAndNewlines)
+                    if !trimmed.isEmpty { return trimmed }
+                }
+            }
+            for child in object.values {
+                if let found = token(in: child) { return found }
+            }
+        }
+        if let array = value as? [Any] {
+            for child in array {
+                if let found = token(in: child) { return found }
+            }
+        }
+        return nil
+    }
 }
 
 /// Reads the plant list Eliot returns after a Door Entry sign-in.
@@ -78,9 +233,8 @@ enum DoorEntryAccountDocument {
         }
     }
 
-    /// `www.myhomeweb.com/eliot/plants` with header `PRJ_NAME: C3X`.
-    /// An empty service-catalog body was reported as no device; this portal answers 401
-    /// `User not logged or session expired` when the Eliot token is not a portal session.
+    /// `www.myhomeweb.com/eliot/plants` with header `prj_name` (`C3X` or `MHT`).
+    /// An empty body was reported as no device. HTTP 401 is a missing portal session.
     static func portalPlants(status: Int, warning: String, body: Data) -> Result<[DoorEntryPlant], DoorEntrySignInFailure> {
         if status == 204 || (status == 200 && body.isEmpty) {
             return .failure(.noPlant)
@@ -88,7 +242,7 @@ enum DoorEntryAccountDocument {
         if !(200..<300).contains(status) {
             let reason = warning.trimmingCharacters(in: .whitespacesAndNewlines)
             let detail = reason.isEmpty ? "HTTP \(status)" : reason
-            return .failure(.unreachable("Signed in to Eliot. Door Entry's portal answered \(detail)."))
+            return .failure(.unreachable("The portal answered \(detail)."))
         }
         let parsed = plants(in: body)
         if !parsed.isEmpty { return .success(parsed) }
@@ -196,6 +350,7 @@ enum EliotAccountPage {
 final class EliotDirectory: DoorEntryDirectory, SipCredentials, PortalTokenProviding, SipCertificateProvisioning {
     private let provisioning: SipProvisioning
     private let certificateProvisioning: SipCertificateProvisioner
+    private let portalHTTP: URLSession
     private(set) var lastToken: String?
 
     init(
@@ -205,7 +360,20 @@ final class EliotDirectory: DoorEntryDirectory, SipCredentials, PortalTokenProvi
         certificateProvisioning: SipCertificateProvisioner? = nil
     ) {
         self.provisioning = provisioning
-        self.certificateProvisioning = certificateProvisioning ?? SipCertificateProvisioner()
+        let provisioner = certificateProvisioning ?? SipCertificateProvisioner()
+        self.certificateProvisioning = provisioner
+        let storage = HTTPCookieStorage()
+        storage.cookieAcceptPolicy = .always
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.httpCookieStorage = storage
+        configuration.httpShouldSetCookies = true
+        configuration.httpCookieAcceptPolicy = .always
+        let session = URLSession(configuration: configuration)
+        self.portalHTTP = session
+        if let provisioning = provisioning as? EliotSipProvisioning {
+            provisioning.session = session
+        }
+        provisioner.session = session
     }
 
     var portalToken: String? { lastToken }
@@ -217,11 +385,22 @@ final class EliotDirectory: DoorEntryDirectory, SipCredentials, PortalTokenProvi
         _ = try await certificateProvisioning.ensureMaterial(deviceName: deviceName, token: token)
     }
 
-    func plants(email: String, password: String) async -> Result<[DoorEntryPlant], DoorEntrySignInFailure> {
+    func plants(email: String, password: String, product: DoorProduct) async -> Result<[DoorEntryPlant], DoorEntrySignInFailure> {
+        if let profile = product.portal {
+            return await portalPlants(email: email, password: password, profile: profile)
+        }
+        return await eliotPlants(email: email, password: password, client: product.eliotClient)
+    }
+
+    /// Door Entry 1.13.6 posts the account to `/eliot/users/sign_in`, then lists `/eliot/plants`
+    /// with the same cookies and `prj_name`.
+    private func portalPlants(email: String, password: String, profile: PortalSignIn.Profile) async -> Result<[DoorEntryPlant], DoorEntrySignInFailure> {
         do {
-            let token = try await accessToken(email: email, password: password)
-            lastToken = token
-            let plants = try await plants(token: token)
+            let ticket = try await signPortal(email: email, password: password, profile: profile)
+            lastToken = ticket.token
+            apply(profile: profile, token: ticket.token, sendsBearer: false)
+            if !ticket.plants.isEmpty { return .success(ticket.plants) }
+            let plants = try await listedPlants(profile: profile, token: ticket.token, sendsBearer: false)
             if plants.isEmpty { return .failure(.noPlant) }
             return .success(plants)
         } catch let failure as DoorEntrySignInFailure {
@@ -231,8 +410,124 @@ final class EliotDirectory: DoorEntryDirectory, SipCredentials, PortalTokenProvi
         }
     }
 
-    private func accessToken(email: String, password: String) async throws -> String {
-        try await EliotWebJourney(wire: URLSessionEliotWire()).submitSignIn(identifier: email, password: password)
+    /// Classe 100X and EasyKit still exchange an Eliot authorization code, then read the catalog.
+    private func eliotPlants(email: String, password: String, client: EliotClient) async -> Result<[DoorEntryPlant], DoorEntrySignInFailure> {
+        do {
+            let token = try await EliotWebJourney(wire: URLSessionEliotWire()).submitSignIn(
+                identifier: email,
+                password: password,
+                client: client
+            )
+            lastToken = token
+            apply(profile: nil, token: token, sendsBearer: true)
+            let plants = try await catalogPlants(token: token)
+            if plants.isEmpty { return .failure(.noPlant) }
+            return .success(plants)
+        } catch let failure as DoorEntrySignInFailure {
+            return .failure(failure)
+        } catch {
+            return .failure(.unreachable(error.localizedDescription))
+        }
+    }
+
+    private func apply(profile: PortalSignIn.Profile?, token: String?, sendsBearer: Bool) {
+        if let provisioning = provisioning as? EliotSipProvisioning {
+            if let profile {
+                provisioning.userAgent = profile.userAgent
+                provisioning.projectName = profile.projectName
+            }
+            provisioning.authToken = token
+            provisioning.sendsBearer = sendsBearer
+        }
+        if let profile {
+            certificateProvisioning.userAgent = profile.userAgent
+            certificateProvisioning.projectName = profile.projectName
+        }
+        certificateProvisioning.authToken = token
+        certificateProvisioning.sendsBearer = sendsBearer
+    }
+
+    private func signPortal(email: String, password: String, profile: PortalSignIn.Profile) async throws -> PortalSignIn.Ticket {
+        guard let url = URL(string: "https://www.myhomeweb.com/eliot/users/sign_in") else {
+            throw DoorEntrySignInFailure.unreachable("Portal sign-in URL could not be built.")
+        }
+        var request = URLRequest(url: url, timeoutInterval: 20)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        request.setValue(profile.projectName, forHTTPHeaderField: "prj_name")
+        request.setValue(profile.userAgent, forHTTPHeaderField: "User-Agent")
+        request.httpBody = PortalSignIn.jsonBody(username: email, password: password, profile: profile)
+        let (data, response) = try await portalHTTP.data(for: request)
+        let http = response as? HTTPURLResponse
+        let status = http?.statusCode ?? 0
+        let warning = http?.value(forHTTPHeaderField: "Warning") ?? ""
+        let headerToken = http?.value(forHTTPHeaderField: "auth_token")
+        let outcome = try PortalSignIn.outcome(status: status, warning: warning, body: data).get()
+        if outcome.token == nil, let headerToken, !headerToken.isEmpty {
+            return PortalSignIn.Ticket(token: headerToken, plants: outcome.plants)
+        }
+        return outcome
+    }
+
+    private func listedPlants(profile: PortalSignIn.Profile, token: String?, sendsBearer: Bool) async throws -> [DoorEntryPlant] {
+        guard let url = URL(string: "https://www.myhomeweb.com/eliot/plants") else {
+            throw DoorEntrySignInFailure.unreachable("Portal plant URL could not be built.")
+        }
+        var request = URLRequest(url: url, timeoutInterval: 20)
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        request.setValue(profile.projectName, forHTTPHeaderField: "prj_name")
+        request.setValue(profile.userAgent, forHTTPHeaderField: "User-Agent")
+        if let token {
+            request.setValue(token, forHTTPHeaderField: "auth_token")
+            if sendsBearer {
+                request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+            }
+        }
+        let (data, response) = try await portalHTTP.data(for: request)
+        let http = response as? HTTPURLResponse
+        let status = http?.statusCode ?? 0
+        let warning = http?.value(forHTTPHeaderField: "Warning") ?? ""
+        return try DoorEntryAccountDocument.portalPlants(status: status, warning: warning, body: data).get()
+    }
+
+    /// Service catalog used by Classe 100X and EasyKit. No subscription key is sent.
+    private func catalogPlants(token: String) async throws -> [DoorEntryPlant] {
+        guard let url = URL(string: "https://api.developer.legrand.com/servicecatalog/api/v3.0/plants") else {
+            throw DoorEntrySignInFailure.unreachable("Catalog URL could not be built.")
+        }
+        var request = URLRequest(url: url, timeoutInterval: 20)
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        let (data, response) = try await URLSession.shared.data(for: request)
+        let status = (response as? HTTPURLResponse)?.statusCode ?? 0
+        if status == 204 || (status == 200 && data.isEmpty) {
+            throw DoorEntrySignInFailure.noPlant
+        }
+        guard (200..<300).contains(status) else {
+            throw DoorEntrySignInFailure.unreachable("The service catalog answered HTTP \(status).")
+        }
+        let listed = DoorEntryAccountDocument.catalogPlants(in: data)
+        if listed.isEmpty { return [] }
+        var plants: [DoorEntryPlant] = []
+        for row in listed {
+            let gateway = await catalogGateway(plantID: row.id, token: token) ?? row.id
+            plants.append(DoorEntryPlant(plantID: row.id, gatewayID: gateway, name: row.name))
+        }
+        return plants
+    }
+
+    private func catalogGateway(plantID: String, token: String) async -> String? {
+        guard let url = URL(string: "https://api.developer.legrand.com/servicecatalog/api/v3.0/plants/\(plantID)/modules") else {
+            return nil
+        }
+        var request = URLRequest(url: url, timeoutInterval: 20)
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        guard let (data, response) = try? await URLSession.shared.data(for: request),
+              let status = (response as? HTTPURLResponse)?.statusCode,
+              (200..<300).contains(status) else { return nil }
+        return DoorEntryAccountDocument.gatewayID(in: data)
     }
 
     /// Uses the token from the last sign-in to read the gateway's SIP account.
@@ -241,22 +536,5 @@ final class EliotDirectory: DoorEntryDirectory, SipCredentials, PortalTokenProvi
             throw SipProvisioningFailure.unreachable("Sign in before provisioning the SIP account.")
         }
         return try await provisioning.sipAccount(plantID: plantID, gatewayID: gatewayID, token: token)
-    }
-
-    /// Door Entry 1.13.5 stores `prj_name` / `C3X`. The live list is `/eliot/plants`, not the service catalog.
-    private func plants(token: String) async throws -> [DoorEntryPlant] {
-        guard let url = URL(string: "https://www.myhomeweb.com/eliot/plants") else {
-            throw DoorEntrySignInFailure.unreachable("Eliot plant URL could not be built.")
-        }
-        var request = URLRequest(url: url, timeoutInterval: 20)
-        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-        request.setValue("application/json", forHTTPHeaderField: "Accept")
-        request.setValue("C3X", forHTTPHeaderField: "PRJ_NAME")
-        request.setValue("doorentryforc300x-ios-1.13.5", forHTTPHeaderField: "User-Agent")
-        let (data, response) = try await URLSession.shared.data(for: request)
-        let http = response as? HTTPURLResponse
-        let status = http?.statusCode ?? 0
-        let warning = http?.value(forHTTPHeaderField: "Warning") ?? ""
-        return try DoorEntryAccountDocument.portalPlants(status: status, warning: warning, body: data).get()
     }
 }

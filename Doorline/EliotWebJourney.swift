@@ -232,16 +232,7 @@ enum EliotEndpoints {
     static let scope = "openid offline_access https://EliotClouduamprd.onmicrosoft.com/security/access.full"
 
     static func authorize(policy: String) -> String {
-        let query = [
-            "p=\(policy)",
-            "client_id=\(clientID)",
-            "nonce=defaultNonce",
-            "redirect_uri=\(EliotPageScript.encodeURIComponent(redirect))",
-            "scope=\(EliotPageScript.encodeURIComponent(scope))",
-            "response_type=code",
-            "prompt=login",
-        ].joined(separator: "&")
-        return "\(origin)/EliotClouduamprd.onmicrosoft.com/oauth2/v2.0/authorize?\(query)"
+        EliotClient.classe300X.authorize(policy: policy)
     }
 
     static func selfAsserted(page: EliotParsedPage) -> String {
@@ -254,6 +245,34 @@ enum EliotEndpoints {
 
     static func signup(page: EliotParsedPage) -> String {
         "\(origin)\(page.tenant)/api/\(page.api)/unified?local=signup&csrf_token=\(page.csrf)&tx=\(page.transId)&p=\(page.policy)"
+    }
+}
+
+/// One Eliot application registration: policy, public client id, and redirect.
+struct EliotClient: Sendable, Equatable {
+    var signInPolicy: String
+    var passwordPolicy: String
+    var clientID: String
+    var redirect: String
+
+    static let classe300X = EliotClient(
+        signInPolicy: EliotEndpoints.signInPolicy,
+        passwordPolicy: EliotEndpoints.passwordPolicy,
+        clientID: EliotEndpoints.clientID,
+        redirect: EliotEndpoints.redirect
+    )
+
+    func authorize(policy: String) -> String {
+        let query = [
+            "p=\(policy)",
+            "client_id=\(clientID)",
+            "nonce=defaultNonce",
+            "redirect_uri=\(EliotPageScript.encodeURIComponent(redirect))",
+            "scope=\(EliotPageScript.encodeURIComponent(EliotEndpoints.scope))",
+            "response_type=code",
+            "prompt=login",
+        ].joined(separator: "&")
+        return "\(EliotEndpoints.origin)/EliotClouduamprd.onmicrosoft.com/oauth2/v2.0/authorize?\(query)"
     }
 }
 
@@ -309,8 +328,8 @@ final class EliotWebJourney {
         self.wire = wire
     }
 
-    func loadSignIn() async throws -> EliotParsedPage {
-        let response = try await get(EliotEndpoints.authorize(policy: EliotEndpoints.signInPolicy))
+    func loadSignIn(client: EliotClient = .classe300X) async throws -> EliotParsedPage {
+        let response = try await get(client.authorize(policy: client.signInPolicy))
         guard let parsed = EliotPageDocument.parse(String(decoding: response.body, as: UTF8.self)) else {
             throw DoorEntrySignInFailure.unreachable("Eliot's sign-in page had no session.")
         }
@@ -318,8 +337,8 @@ final class EliotWebJourney {
         return parsed
     }
 
-    func submitSignIn(identifier: String, password: String) async throws -> String {
-        let parsed = try await loadSignIn()
+    func submitSignIn(identifier: String, password: String, client: EliotClient = .classe300X) async throws -> String {
+        let parsed = try await loadSignIn(client: client)
         let posted = try await post(
             EliotEndpoints.selfAsserted(page: parsed),
             body: EliotPageScript.signInBody(identifier: identifier, password: password),
@@ -336,10 +355,10 @@ final class EliotWebJourney {
         let tokenURL = "\(EliotEndpoints.origin)/EliotClouduamprd.onmicrosoft.com/oauth2/v2.0/token?p=\(parsed.policy)"
         let tokenBody = [
             "grant_type=authorization_code",
-            "client_id=\(EliotEndpoints.clientID)",
+            "client_id=\(client.clientID)",
             "scope=\(EliotPageScript.encodeURIComponent(EliotEndpoints.scope))",
             "code=\(EliotPageScript.encodeURIComponent(code))",
-            "redirect_uri=\(EliotPageScript.encodeURIComponent(EliotEndpoints.redirect))",
+            "redirect_uri=\(EliotPageScript.encodeURIComponent(client.redirect))",
         ].joined(separator: "&")
         let token = try await post(tokenURL, body: tokenBody, csrf: nil)
         guard let json = try? JSONSerialization.jsonObject(with: token.body) as? [String: Any],
@@ -349,16 +368,16 @@ final class EliotWebJourney {
         return access
     }
 
-    func loadPasswordReset() async throws {
-        let response = try await get(EliotEndpoints.authorize(policy: EliotEndpoints.passwordPolicy))
+    func loadPasswordReset(client: EliotClient = .classe300X) async throws {
+        let response = try await get(client.authorize(policy: client.passwordPolicy))
         guard let parsed = EliotPageDocument.parse(String(decoding: response.body, as: UTF8.self)) else {
             throw DoorEntrySignInFailure.unreachable("Eliot's password page had no session.")
         }
         page = parsed
     }
 
-    func loadRegistration() async throws {
-        let response = try await get(EliotEndpoints.authorize(policy: EliotEndpoints.signInPolicy))
+    func loadRegistration(client: EliotClient = .classe300X) async throws {
+        let response = try await get(client.authorize(policy: client.signInPolicy))
         guard let authorizePage = EliotPageDocument.parse(String(decoding: response.body, as: UTF8.self)) else {
             throw DoorEntrySignInFailure.unreachable("Eliot's sign-in page had no session.")
         }

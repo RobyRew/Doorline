@@ -178,8 +178,9 @@ final class LinphoneManager: SipRegistrar {
     func sendMessage(_ body: String) {
         guard let core, let account else { return }
         let gateway = "sip:c300x@\(account.domain)"
+        let roomParams: ChatRoomParams? = nil
         guard let address = try? Factory.Instance.createAddress(addr: gateway),
-              let room = core.searchChatRoom(params: nil, localAddr: nil, remoteAddr: address, participants: nil) else { return }
+              let room = core.searchChatRoom(params: roomParams, localAddr: nil, remoteAddr: address, participants: nil) else { return }
         let message = "msg: \(body), addr: \(gateway)"
         if let chatMessage = try? room.createMessageFromUtf8(message: message) {
             chatMessage.send()

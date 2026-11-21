@@ -29,7 +29,11 @@ protocol SipCertificateProvisioning: AnyObject {
 @MainActor
 final class SipCertificateProvisioner {
     var host: String = "https://www.myhomeweb.com"
-    var userAgent: String = "doorentryforc300x-ios-1.13.5"
+    var userAgent: String = "doorentryforc300x-ios-1.13.6"
+    var projectName: String = "C3X"
+    var session: URLSession = .shared
+    var authToken: String?
+    var sendsBearer = false
 
     /// Returns the stored material, or signs a new one when the portal has none yet.
     func ensureMaterial(deviceName: String, token: String) async throws -> SipCertificateMaterial {
@@ -53,12 +57,17 @@ final class SipCertificateProvisioner {
         }
         var request = URLRequest(url: url, timeoutInterval: 20)
         request.httpMethod = "POST"
-        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-        request.setValue("C3X", forHTTPHeaderField: "PRJ_NAME")
+        request.setValue(projectName, forHTTPHeaderField: "prj_name")
         request.setValue(userAgent, forHTTPHeaderField: "User-Agent")
+        if let authToken {
+            request.setValue(authToken, forHTTPHeaderField: "auth_token")
+        }
+        if sendsBearer {
+            request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        }
         request.setValue("text/plain", forHTTPHeaderField: "Content-Type")
         request.httpBody = Data(csrPEM.utf8)
-        let (data, response) = try await URLSession.shared.data(for: request)
+        let (data, response) = try await session.data(for: request)
         let status = (response as? HTTPURLResponse)?.statusCode ?? 0
         guard (200..<300).contains(status) else {
             throw CertificateProvisioningFailure.unreachable("Certificate signing answered HTTP \(status).")
