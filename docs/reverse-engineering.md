@@ -303,6 +303,43 @@ discovered IP locally, so the portal is not guaranteed to have it.)
 - `ifconfig.io/ip` — the app queries its public IP (used during gateway association to
   detect NAT).
 
+## 9. 1.13.6 and the other Door Entry apps
+
+Checked against the decrypted 1.13.6 Classe 300X and Home Touch binaries, Classe 100X 1.7.2, and EasyKit 1.7.0. 1.13.6 removed the Eliot B2C web sign-in. Classe 300X and Home Touch post the account to the portal. Classe 100X and EasyKit still use Eliot, then the Legrand developer catalog.
+
+### 9.1 Portal sign-in (Classe 300X and Home Touch)
+
+`loadAccountData` builds the JSON body with `username`, `password`, and `rememberMe`. `requestCustom` also sends `appVersion` and `registrationId`. The password field is `password`. There is no `pwd`, `brand`, or `tokenPasswordExpired` field.
+
+The product code is the `prj_name` header, built next to `Content-Type` and `Accept`:
+
+- Classe 300X: `C3X` (`mov w9, #0x3343; movk w9, #0x58, lsl #16`)
+- Home Touch: `MHT` (`mov w9, #0x484d` plus the `T`)
+
+The path is `/users/sign_in` on `https://www.myhomeweb.com:443`, prefixed with `/eliot`. A successful body is read for `auth_token`. User agents are `doorentryforc300x-ios-` and `doorentryforHOMETOUCH-ios-`.
+
+### 9.2 SIP proxy and panel address
+
+| App | Proxy | Panel user |
+|---|---|---|
+| Classe 300X 1.13.6 | `app.sipserver.bs.iotleg.com` | `sip:c300x@` |
+| Home Touch 1.13.6 | `app.sipserver.bs.iotleg.com` | `sip:MHT@` |
+| Classe 100X 1.7.2 | `vdesip.bs.iotleg.com` | `sip:c100x@` |
+| EasyKit 1.7.0 | `vdesip.bs.iotleg.com` | `sip:diy@` |
+
+1.13.5's default host was `sipserver.bs.iotleg.com`. 1.13.6 replaced it. Registration is still TLS on port 443. When the SIP document omits the proxy and port, Doorline uses the row above.
+
+Classe 100X and EasyKit do not call `/eliot/sip/users`. Their SIP document is `GET /devicemanagement/api/v2.0/modules/{id}/vde/sip` on `https://api.developer.legrand.com`, with `Authorization: Bearer` and `Ocp-Apim-Subscription-Key`.
+
+### 9.3 Developer catalog (Classe 100X and EasyKit)
+
+Both still sign in with Eliot B2C (`89157f0f-9a06-e811-80c2-0003ff433c2c`, policies `B2C_1_DoorEliot-C100X-*` and `B2C_1_DoorEliot-DIY-*`). Plant and module calls go to `api.developer.legrand.com` and send `Ocp-Apim-Subscription-Key`. The production key is the second 32-character key after the API host in each binary:
+
+- Classe 100X: `a61c185c9b97499e9f64c0e798f324bc`
+- EasyKit: `f36968e522bf4ec3877fa491109d3d14`
+
+The client certificate for those two apps is `POST /certificate/api/v1.0/ca/information/clientCerts`, not `/users/cert/signcert`. The JSON field that carries the CSR is still not pinned.
+
 ## 8. Doorline TODO derived from this
 
 1. SIP user parser: add `sipUser`/`sipAccount` username spellings. — in `Sip.swift`.

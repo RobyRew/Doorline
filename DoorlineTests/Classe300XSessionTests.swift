@@ -262,7 +262,7 @@ final class Classe300XSessionTests: XCTestCase {
         XCTAssertTrue(DoorEntryAccountDocument.catalogPlants(in: Data()).isEmpty)
     }
 
-    func testPortalSignInPostsThePasswordAsPwdForTheSelectedProduct() throws {
+    func testPortalSignInPostsThePasswordAndRoutesEachProduct() throws {
         let body = PortalSignIn.jsonBody(
             username: "ada@example.com",
             password: "secret",
@@ -270,10 +270,21 @@ final class Classe300XSessionTests: XCTestCase {
         )
         let json = try XCTUnwrap(JSONSerialization.jsonObject(with: body) as? [String: Any])
         XCTAssertEqual(json["username"] as? String, "ada@example.com")
-        XCTAssertEqual(json["pwd"] as? String, "secret")
-        XCTAssertEqual(json["brand"] as? String, "C3X")
+        XCTAssertEqual(json["password"] as? String, "secret")
+        XCTAssertEqual(json["rememberMe"] as? Bool, true)
         XCTAssertEqual(json["appVersion"] as? String, "1.13.6")
+        XCTAssertNil(json["pwd"])
+        XCTAssertEqual(DoorProduct.classe300X.portal?.projectName, "C3X")
         XCTAssertEqual(DoorProduct.homeTouch.portal?.projectName, "MHT")
+        XCTAssertEqual(DoorProduct.classe300X.sipRoute.panelUser, "c300x")
+        XCTAssertEqual(DoorProduct.homeTouch.sipRoute.panelUser, "MHT")
+        XCTAssertEqual(DoorProduct.homeTouch.sipRoute.proxy, "app.sipserver.bs.iotleg.com")
+        XCTAssertEqual(DoorProduct.classe100X.sipRoute.proxy, "vdesip.bs.iotleg.com")
+        XCTAssertEqual(DoorProduct.classe100X.sipRoute.panelUser, "c100x")
+        XCTAssertEqual(DoorProduct.easyKit.sipRoute.panelUser, "diy")
+        XCTAssertNotNil(DoorProduct.classe100X.subscriptionKey)
+        XCTAssertNotNil(DoorProduct.easyKit.subscriptionKey)
+        XCTAssertNil(DoorProduct.classe300X.subscriptionKey)
         XCTAssertNil(DoorProduct.classe100X.portal)
         XCTAssertEqual(DoorProduct.easyKit.eliotClient.redirect, "com.legrandgroup.diy://oauth2redirect")
     }

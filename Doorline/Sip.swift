@@ -21,9 +21,15 @@ struct SipAccount: Equatable, Sendable, Codable {
     var proxy: String
     var port: Int?
     var transport: SipTransport
+    /// Local part of the panel's SIP address. Classe 300X is `c300x`, Home Touch is `MHT`,
+    /// Classe 100X is `c100x`, EasyKit is `diy`.
+    var panelUser: String
 
     /// `sip:username@domain`.
     var identity: String { "sip:\(username)@\(domain)" }
+
+    /// `sip:<panelUser>@domain` — the internal unit Door Entry dials and messages.
+    var panelAddress: String { "sip:\(panelUser)@\(domain)" }
 
     /// `sip:proxy[:port]` — the transport is set on the address, not embedded here.
     var serverAddress: String {
@@ -59,6 +65,11 @@ final class EliotSipProvisioning: SipProvisioning, @unchecked Sendable {
     var session: URLSession = .shared
     var authToken: String?
     var sendsBearer = false
+    /// Used when the SIP document does not name a proxy. Door Entry 1.13.6 registers
+    /// Classe 300X and Home Touch at `app.sipserver.bs.iotleg.com`.
+    var fallbackProxy = "app.sipserver.bs.iotleg.com"
+    var fallbackPort = 443
+    var panelUser = "c300x"
 
     func sipAccount(plantID: String, gatewayID: String, token: String) async throws -> SipAccount {
         guard let url = URL(string: "\(host)/eliot/sip/users/plants/\(plantID)/gateway/\(gatewayID)") else {
@@ -79,7 +90,13 @@ final class EliotSipProvisioning: SipProvisioning, @unchecked Sendable {
         guard (200..<300).contains(status) else {
             throw SipProvisioningFailure.unreachable("SIP provisioning answered HTTP \(status).")
         }
-        return try SipAccountDocument.parse(data, fallbackDomain: "\(plantID).bs.iotleg.com")
+        return try SipAccountDocument.parse(
+            data,
+            fallbackDomain: "\(plantID).bs.iotleg.com",
+            fallbackProxy: fallbackProxy,
+            fallbackPort: fallbackPort,
+            panelUser: panelUser
+        )
     }
 }
 
@@ -96,7 +113,13 @@ enum SipAccountDocument {
     static let portKeys = ["port", "sipPort", "sip_port"]
     static let transportKeys = ["transport", "sipTransport", "sip_transport"]
 
-    static func parse(_ data: Data, fallbackDomain: String) throws -> SipAccount {
+    static func parse(
+        _ data: Data,
+        fallbackDomain: String,
+        fallbackProxy: String = "app.sipserver.bs.iotleg.com",
+        fallbackPort: Int = 443,
+        panelUser: String = "c300x"
+    ) throws -> SipAccount {
         guard let json = try? JSONSerialization.jsonObject(with: data) else {
             throw SipProvisioningFailure.malformed("SIP account response was not JSON.")
         }
@@ -108,15 +131,16 @@ enum SipAccountDocument {
             throw SipProvisioningFailure.malformed("SIP account was missing credentials.")
         }
         let domain = text(node, domainKeys) ?? fallbackDomain
-        let proxy = text(node, proxyKeys) ?? domain
+        let proxy = text(node, proxyKeys) ?? fallbackProxy
         let transport = SipTransport(rawValue: (text(node, transportKeys) ?? "tls").lowercased()) ?? .tls
         return SipAccount(
             username: username,
             password: password,
             domain: domain,
             proxy: proxy,
-            port: int(node, portKeys),
-            transport: transport
+            port: int(node, portKeys) ?? fallbackPort,
+            transport: transport,
+            panelUser: panelUser
         )
     }
 

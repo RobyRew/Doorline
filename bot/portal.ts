@@ -81,11 +81,10 @@ export function livePortal(): DoorPortal {
         },
         body: JSON.stringify({
           username: email,
-          pwd: password,
+          password,
+          rememberMe: true,
           appVersion: profile.appVersion,
-          brand: project,
           registrationId: '',
-          tokenPasswordExpired: false,
         }),
       })
       const body = await readJson(res)

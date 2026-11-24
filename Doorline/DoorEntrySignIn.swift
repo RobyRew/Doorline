@@ -111,6 +111,35 @@ enum DoorProduct: String, CaseIterable, Identifiable, Sendable {
         }
     }
 
+    /// Where the phone registers, and the panel user it dials.
+    /// Door Entry 1.13.6 uses `app.sipserver.bs.iotleg.com` for Classe 300X and Home Touch.
+    /// Classe 100X 1.7.2 and EasyKit 1.7.0 use `vdesip.bs.iotleg.com`. Both listen on TLS 443.
+    var sipRoute: (proxy: String, port: Int, panelUser: String) {
+        switch self {
+        case .classe300X:
+            ("app.sipserver.bs.iotleg.com", 443, "c300x")
+        case .homeTouch:
+            ("app.sipserver.bs.iotleg.com", 443, "MHT")
+        case .classe100X:
+            ("vdesip.bs.iotleg.com", 443, "c100x")
+        case .easyKit:
+            ("vdesip.bs.iotleg.com", 443, "diy")
+        }
+    }
+
+    /// `Ocp-Apim-Subscription-Key` for the Legrand developer catalog.
+    /// The production key is the second key stored after the API host in each binary.
+    var subscriptionKey: String? {
+        switch self {
+        case .classe100X:
+            "a61c185c9b97499e9f64c0e798f324bc"
+        case .easyKit:
+            "f36968e522bf4ec3877fa491109d3d14"
+        case .classe300X, .homeTouch:
+            nil
+        }
+    }
+
     /// Classe 100X 1.7.2 and EasyKit 1.7.0 still open an Eliot B2C page.
     /// The client id is the UUID stored beside that policy in each binary.
     var eliotClient: EliotClient {
@@ -136,8 +165,9 @@ enum DoorProduct: String, CaseIterable, Identifiable, Sendable {
 }
 
 /// Password sign-in against `www.myhomeweb.com/eliot/users/sign_in`.
-/// Door Entry 1.13.6 sends `username`, `pwd`, `appVersion`, `brand`, `registrationId`,
-/// and `tokenPasswordExpired`, with header `prj_name` set to the product (`C3X` or `MHT`).
+/// Door Entry 1.13.6 posts `username`, `password`, and `rememberMe`. The same request
+/// also carries `appVersion` and an empty `registrationId`. The product code (`C3X` or
+/// `MHT`) is the `prj_name` header, not a body field.
 enum PortalSignIn {
     struct Profile: Equatable, Sendable {
         var projectName: String
@@ -153,11 +183,10 @@ enum PortalSignIn {
     static func jsonBody(username: String, password: String, profile: Profile) -> Data {
         let object: [String: Any] = [
             "username": username,
-            "pwd": password,
+            "password": password,
+            "rememberMe": true,
             "appVersion": profile.appVersion,
-            "brand": profile.projectName,
             "registrationId": "",
-            "tokenPasswordExpired": false,
         ]
         return (try? JSONSerialization.data(withJSONObject: object)) ?? Data()
     }
@@ -352,6 +381,11 @@ final class EliotDirectory: DoorEntryDirectory, SipCredentials, PortalTokenProvi
     private let certificateProvisioning: SipCertificateProvisioner
     private let portalHTTP: URLSession
     private(set) var lastToken: String?
+    private var developerAPI = false
+    private var subscriptionKey: String?
+    private var fallbackProxy = "app.sipserver.bs.iotleg.com"
+    private var fallbackPort = 443
+    private var panelUser = "c300x"
 
     init(
         provisioning: SipProvisioning = EliotSipProvisioning(),
@@ -387,18 +421,18 @@ final class EliotDirectory: DoorEntryDirectory, SipCredentials, PortalTokenProvi
 
     func plants(email: String, password: String, product: DoorProduct) async -> Result<[DoorEntryPlant], DoorEntrySignInFailure> {
         if let profile = product.portal {
-            return await portalPlants(email: email, password: password, profile: profile)
+            return await portalPlants(email: email, password: password, profile: profile, product: product)
         }
-        return await eliotPlants(email: email, password: password, client: product.eliotClient)
+        return await eliotPlants(email: email, password: password, product: product)
     }
 
     /// Door Entry 1.13.6 posts the account to `/eliot/users/sign_in`, then lists `/eliot/plants`
     /// with the same cookies and `prj_name`.
-    private func portalPlants(email: String, password: String, profile: PortalSignIn.Profile) async -> Result<[DoorEntryPlant], DoorEntrySignInFailure> {
+    private func portalPlants(email: String, password: String, profile: PortalSignIn.Profile, product: DoorProduct) async -> Result<[DoorEntryPlant], DoorEntrySignInFailure> {
         do {
             let ticket = try await signPortal(email: email, password: password, profile: profile)
             lastToken = ticket.token
-            apply(profile: profile, token: ticket.token, sendsBearer: false)
+            apply(profile: profile, product: product, token: ticket.token, sendsBearer: false)
             if !ticket.plants.isEmpty { return .success(ticket.plants) }
             let plants = try await listedPlants(profile: profile, token: ticket.token, sendsBearer: false)
             if plants.isEmpty { return .failure(.noPlant) }
@@ -411,16 +445,16 @@ final class EliotDirectory: DoorEntryDirectory, SipCredentials, PortalTokenProvi
     }
 
     /// Classe 100X and EasyKit still exchange an Eliot authorization code, then read the catalog.
-    private func eliotPlants(email: String, password: String, client: EliotClient) async -> Result<[DoorEntryPlant], DoorEntrySignInFailure> {
+    private func eliotPlants(email: String, password: String, product: DoorProduct) async -> Result<[DoorEntryPlant], DoorEntrySignInFailure> {
         do {
             let token = try await EliotWebJourney(wire: URLSessionEliotWire()).submitSignIn(
                 identifier: email,
                 password: password,
-                client: client
+                client: product.eliotClient
             )
             lastToken = token
-            apply(profile: nil, token: token, sendsBearer: true)
-            let plants = try await catalogPlants(token: token)
+            apply(profile: nil, product: product, token: token, sendsBearer: true)
+            let plants = try await catalogPlants(token: token, subscriptionKey: product.subscriptionKey)
             if plants.isEmpty { return .failure(.noPlant) }
             return .success(plants)
         } catch let failure as DoorEntrySignInFailure {
@@ -430,7 +464,8 @@ final class EliotDirectory: DoorEntryDirectory, SipCredentials, PortalTokenProvi
         }
     }
 
-    private func apply(profile: PortalSignIn.Profile?, token: String?, sendsBearer: Bool) {
+    private func apply(profile: PortalSignIn.Profile?, product: DoorProduct, token: String?, sendsBearer: Bool) {
+        let route = product.sipRoute
         if let provisioning = provisioning as? EliotSipProvisioning {
             if let profile {
                 provisioning.userAgent = profile.userAgent
@@ -438,13 +473,28 @@ final class EliotDirectory: DoorEntryDirectory, SipCredentials, PortalTokenProvi
             }
             provisioning.authToken = token
             provisioning.sendsBearer = sendsBearer
+            provisioning.fallbackProxy = route.proxy
+            provisioning.fallbackPort = route.port
+            provisioning.panelUser = route.panelUser
         }
         if let profile {
             certificateProvisioning.userAgent = profile.userAgent
             certificateProvisioning.projectName = profile.projectName
+            certificateProvisioning.host = "https://www.myhomeweb.com"
+            certificateProvisioning.certificatePath = "/eliot/users/cert/signcert"
+            certificateProvisioning.subscriptionKey = nil
+        } else {
+            certificateProvisioning.host = "https://api.developer.legrand.com"
+            certificateProvisioning.certificatePath = "/certificate/api/v1.0/ca/information/clientCerts"
+            certificateProvisioning.subscriptionKey = product.subscriptionKey
         }
         certificateProvisioning.authToken = token
         certificateProvisioning.sendsBearer = sendsBearer
+        developerAPI = product.subscriptionKey != nil
+        subscriptionKey = product.subscriptionKey
+        panelUser = route.panelUser
+        fallbackProxy = route.proxy
+        fallbackPort = route.port
     }
 
     private func signPortal(email: String, password: String, profile: PortalSignIn.Profile) async throws -> PortalSignIn.Ticket {
@@ -491,14 +541,18 @@ final class EliotDirectory: DoorEntryDirectory, SipCredentials, PortalTokenProvi
         return try DoorEntryAccountDocument.portalPlants(status: status, warning: warning, body: data).get()
     }
 
-    /// Service catalog used by Classe 100X and EasyKit. No subscription key is sent.
-    private func catalogPlants(token: String) async throws -> [DoorEntryPlant] {
+    /// Service catalog used by Classe 100X and EasyKit. The catalog rejects a call that
+    /// omits `Ocp-Apim-Subscription-Key`.
+    private func catalogPlants(token: String, subscriptionKey: String?) async throws -> [DoorEntryPlant] {
         guard let url = URL(string: "https://api.developer.legrand.com/servicecatalog/api/v3.0/plants") else {
             throw DoorEntrySignInFailure.unreachable("Catalog URL could not be built.")
         }
         var request = URLRequest(url: url, timeoutInterval: 20)
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         request.setValue("application/json", forHTTPHeaderField: "Accept")
+        if let subscriptionKey {
+            request.setValue(subscriptionKey, forHTTPHeaderField: "Ocp-Apim-Subscription-Key")
+        }
         let (data, response) = try await URLSession.shared.data(for: request)
         let status = (response as? HTTPURLResponse)?.statusCode ?? 0
         if status == 204 || (status == 200 && data.isEmpty) {
@@ -511,19 +565,22 @@ final class EliotDirectory: DoorEntryDirectory, SipCredentials, PortalTokenProvi
         if listed.isEmpty { return [] }
         var plants: [DoorEntryPlant] = []
         for row in listed {
-            let gateway = await catalogGateway(plantID: row.id, token: token) ?? row.id
+            let gateway = await catalogGateway(plantID: row.id, token: token, subscriptionKey: subscriptionKey) ?? row.id
             plants.append(DoorEntryPlant(plantID: row.id, gatewayID: gateway, name: row.name))
         }
         return plants
     }
 
-    private func catalogGateway(plantID: String, token: String) async -> String? {
+    private func catalogGateway(plantID: String, token: String, subscriptionKey: String?) async -> String? {
         guard let url = URL(string: "https://api.developer.legrand.com/servicecatalog/api/v3.0/plants/\(plantID)/modules") else {
             return nil
         }
         var request = URLRequest(url: url, timeoutInterval: 20)
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         request.setValue("application/json", forHTTPHeaderField: "Accept")
+        if let subscriptionKey {
+            request.setValue(subscriptionKey, forHTTPHeaderField: "Ocp-Apim-Subscription-Key")
+        }
         guard let (data, response) = try? await URLSession.shared.data(for: request),
               let status = (response as? HTTPURLResponse)?.statusCode,
               (200..<300).contains(status) else { return nil }
@@ -531,10 +588,39 @@ final class EliotDirectory: DoorEntryDirectory, SipCredentials, PortalTokenProvi
     }
 
     /// Uses the token from the last sign-in to read the gateway's SIP account.
+    /// Classe 300X and Home Touch read `/eliot/sip/users/...` on the portal.
+    /// Classe 100X and EasyKit read `/devicemanagement/api/v2.0/modules/{id}/vde/sip`.
     func sipAccount(plantID: String, gatewayID: String) async throws -> SipAccount {
         guard let token = lastToken else {
             throw SipProvisioningFailure.unreachable("Sign in before provisioning the SIP account.")
         }
+        if developerAPI {
+            return try await developerSipAccount(plantID: plantID, gatewayID: gatewayID, token: token)
+        }
         return try await provisioning.sipAccount(plantID: plantID, gatewayID: gatewayID, token: token)
+    }
+
+    private func developerSipAccount(plantID: String, gatewayID: String, token: String) async throws -> SipAccount {
+        guard let url = URL(string: "https://api.developer.legrand.com/devicemanagement/api/v2.0/modules/\(gatewayID)/vde/sip") else {
+            throw SipProvisioningFailure.unreachable("SIP users URL could not be built.")
+        }
+        var request = URLRequest(url: url, timeoutInterval: 20)
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        if let subscriptionKey {
+            request.setValue(subscriptionKey, forHTTPHeaderField: "Ocp-Apim-Subscription-Key")
+        }
+        let (data, response) = try await URLSession.shared.data(for: request)
+        let status = (response as? HTTPURLResponse)?.statusCode ?? 0
+        guard (200..<300).contains(status) else {
+            throw SipProvisioningFailure.unreachable("SIP provisioning answered HTTP \(status).")
+        }
+        return try SipAccountDocument.parse(
+            data,
+            fallbackDomain: "\(plantID).bs.iotleg.com",
+            fallbackProxy: fallbackProxy,
+            fallbackPort: fallbackPort,
+            panelUser: panelUser
+        )
     }
 }

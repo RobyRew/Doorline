@@ -166,7 +166,7 @@ final class LinphoneManager: SipRegistrar {
             params.audioDirection = .SendRecv
             params.videoEnabled = true
             params.videoDirection = .RecvOnly
-            guard let address = try? Factory.Instance.createAddress(addr: "sip:c300x@\(account.domain)") else { return }
+            guard let address = try? Factory.Instance.createAddress(addr: account.panelAddress) else { return }
             _ = core.inviteAddressWithParams(addr: address, params: params)
         } catch {
             // The delegate reports the resulting call state.
@@ -177,7 +177,7 @@ final class LinphoneManager: SipRegistrar {
     /// `msg: <body>, addr: <address>` body shape.
     func sendMessage(_ body: String) {
         guard let core, let account else { return }
-        let gateway = "sip:c300x@\(account.domain)"
+        let gateway = account.panelAddress
         let roomParams: ChatRoomParams? = nil
         guard let address = try? Factory.Instance.createAddress(addr: gateway),
               let room = core.searchChatRoom(params: roomParams, localAddr: nil, remoteAddr: address, participants: nil) else { return }

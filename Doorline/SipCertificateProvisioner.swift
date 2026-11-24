@@ -34,6 +34,8 @@ final class SipCertificateProvisioner {
     var session: URLSession = .shared
     var authToken: String?
     var sendsBearer = false
+    var certificatePath = "/eliot/users/cert/signcert"
+    var subscriptionKey: String?
 
     /// Returns the stored material, or signs a new one when the portal has none yet.
     func ensureMaterial(deviceName: String, token: String) async throws -> SipCertificateMaterial {
@@ -52,13 +54,16 @@ final class SipCertificateProvisioner {
     /// POSTs the PEM CSR. The portal's response shape is not pinned by a schema; the
     /// certificate is read from the usual spellings and falls back to a raw PEM body.
     func sign(_ csrPEM: String, token: String) async throws -> (certificate: String, rootCA: String?) {
-        guard let url = URL(string: "\(host)/eliot/users/cert/signcert") else {
+        guard let url = URL(string: "\(host)\(certificatePath)") else {
             throw CertificateProvisioningFailure.unreachable("Certificate URL could not be built.")
         }
         var request = URLRequest(url: url, timeoutInterval: 20)
         request.httpMethod = "POST"
         request.setValue(projectName, forHTTPHeaderField: "prj_name")
         request.setValue(userAgent, forHTTPHeaderField: "User-Agent")
+        if let subscriptionKey {
+            request.setValue(subscriptionKey, forHTTPHeaderField: "Ocp-Apim-Subscription-Key")
+        }
         if let authToken {
             request.setValue(authToken, forHTTPHeaderField: "auth_token")
         }
